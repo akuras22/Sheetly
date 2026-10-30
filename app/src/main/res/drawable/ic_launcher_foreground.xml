@@ -3,68 +3,35 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    
-    <!-- Document/PDF background (left side) -->
+
+    <!-- Page -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M 22,16 L 54,16 L 60,22 L 60,82 C 60,85.3 57.3,88 54,88 L 22,88 C 18.7,88 16,85.3 16,82 L 16,22 C 16,18.7 18.7,16 22,16 Z" />
-    
-    <!-- PDF badge on document -->
+        android:pathData="M44,36.5H59L67,44.5V68.5A3,3 0 0 1 64,71.5H44A3,3 0 0 1 41,68.5V39.5A3,3 0 0 1 44,36.5Z" />
+
+    <!-- Folded corner -->
     <path
-        android:fillColor="#2563eb"
-        android:pathData="M 26,36 L 50,36 L 50,48 L 26,48 Z" />
-    
-    <!-- PDF label (simple geometric representation) -->
+        android:fillColor="#B7DDE6"
+        android:pathData="M59,36.5L67,44.5H61.5A2.5,2.5 0 0 1 59,42Z" />
+
+    <!-- Text lines -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M 31,40 L 34,40 L 34,45 L 31,45 Z" />
+        android:strokeColor="#9CC5D0"
+        android:strokeWidth="2.8"
+        android:strokeLineCap="round"
+        android:pathData="M46,47.5H54M46,63.5H62" />
+
+    <!-- Scan beam -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M 36,40 L 48,40 L 48,42 L 36,42 Z" />
+        android:strokeColor="#5EEBB5"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M35.5,55.5H72.5" />
+
+    <!-- Viewfinder corners -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M 36,43 L 48,43 L 48,45 L 36,45 Z" />
-    
-    <!-- Document text lines -->
-    <path
-        android:strokeColor="#bfdbfe"
-        android:strokeWidth="1"
-        android:fillColor="@android:color/transparent"
-        android:pathData="M 24,54 L 50,54 M 24,62 L 50,62 M 24,70 L 48,70 M 24,78 L 40,78" />
-    
-    <!-- Camera body (right side, overlapping) -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M 54,36 L 78,36 C 81.3,36 84,38.7 84,42 L 84,76 C 84,79.3 81.3,82 78,82 L 54,82 C 50.7,82 48,79.3 48,76 L 48,42 C 48,38.7 50.7,36 54,36 Z" />
-    
-    <!-- Camera top bar -->
-    <path
-        android:fillColor="#e0e7ff"
-        android:pathData="M 50,37 L 80,37 L 80,40 L 50,40 Z" />
-    
-    <!-- Camera lens outer ring -->
-    <path
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="#1e40af"
-        android:strokeWidth="2"
-        android:pathData="M 66,46 C 74.2,46 80.5,52.3 80.5,60.5 C 80.5,68.7 74.2,75 66,75 C 57.8,75 51.5,68.7 51.5,60.5 C 51.5,52.3 57.8,46 66,46 Z" />
-    
-    <!-- Camera lens inner (blue) -->
-    <path
-        android:fillColor="#60a5fa"
-        android:pathData="M 66,50 C 71.8,50 76.5,54.7 76.5,60.5 C 76.5,66.3 71.8,71 66,71 C 60.2,71 55.5,66.3 55.5,60.5 C 55.5,54.7 60.2,50 66,50 Z" />
-    
-    <!-- Lens shine/highlight -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:fillAlpha="0.6"
-        android:pathData="M 62,54 A 2,2 0 1,0 62,58 A 2,2 0 1,0 62,54 Z" />
-    
-    <!-- Shutter indicator lines -->
-    <path
-        android:strokeColor="#ffffff"
-        android:strokeWidth="1.2"
-        android:fillColor="@android:color/transparent"
-        android:pathData="M 66,52 L 66,69 M 51,60.5 L 81,60.5" />
-    
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.4"
+        android:strokeLineCap="round"
+        android:pathData="M33.5,41.5V36.5A4.5,4.5 0 0 1 38,32H43M65,32H70A4.5,4.5 0 0 1 74.5,36.5V41.5M74.5,66.5V71.5A4.5,4.5 0 0 1 70,76H65M43,76H38A4.5,4.5 0 0 1 33.5,71.5V66.5" />
 </vector>

@@ -1,0 +1,147 @@
+<resources>
+    <string name="settings">Einstellungen</string>
+    <string name="back">Zurück</string>
+    <string name="scan_document">Dokument scannen</string>
+    <string name="saved_to_downloads">In Downloads/PDFScanner gespeichert</string>
+    <string name="unable_to_save_pdf">PDF konnte nicht gespeichert werden</string>
+    <string name="scanner_unavailable">Scanner nicht verfügbar</string>
+    <string name="processing_scan">Scan wird verarbeitet…</string>
+
+    <string name="allow_install_unknown_apps">Erlaube dieser App das Installieren unbekannter Apps, um zu aktualisieren</string>
+    <string name="allow_install_to_continue">Erlaube dieser App das Installieren unbekannter Apps, um fortzufahren</string>
+    <string name="update_source_not_trusted">Die Update-Quelle ist nicht vertrauenswürdig</string>
+    <string name="unable_access_storage">Kein Speicherzugriff für den Update-Download</string>
+    <string name="could_not_prepare_update_file">Update-Datei konnte nicht vorbereitet werden</string>
+    <string name="update_download_title">PDF-Scanner-Update</string>
+    <string name="update_downloading_version">%1$s wird heruntergeladen</string>
+    <string name="download_status_query_failed">Download-Status konnte nicht abgefragt werden</string>
+    <string name="download_not_found">Update-Download nicht gefunden</string>
+    <string name="download_status_unavailable">Status des Update-Downloads nicht verfügbar</string>
+    <string name="download_failed_or_cancelled">Update-Download abgebrochen oder fehlgeschlagen</string>
+    <string name="downloading_update">Update wird heruntergeladen…</string>
+    <string name="update_integrity_check_failed">Integritätsprüfung des Updates fehlgeschlagen</string>
+    <string name="could_not_open_update">Heruntergeladenes Update konnte nicht geöffnet werden</string>
+    <string name="no_installer_found">Kein Installationsprogramm für das Update gefunden</string>
+    <string name="update_available">Update verfügbar</string>
+    <string name="new_version_available">Eine neuere Version (%1$s) ist verfügbar. Jetzt herunterladen und installieren?</string>
+    <string name="download">Herunterladen</string>
+    <string name="later">Später</string>
+
+    <string name="saved_pdfs">Gespeicherte PDFs</string>
+    <plurals name="documents_count">
+        <item quantity="one">%1$d Dokument</item>
+        <item quantity="other">%1$d Dokumente</item>
+    </plurals>
+    <plurals name="pages_count">
+        <item quantity="one">%1$d Seite</item>
+        <item quantity="other">%1$d Seiten</item>
+    </plurals>
+    <string name="no_scanned_documents">Noch keine gescannten Dokumente</string>
+    <string name="tap_scan_to_start">Tippe unten auf „Dokument scannen“, um loszulegen</string>
+    <string name="no_search_results">Keine passenden Dokumente</string>
+    <string name="no_search_results_hint">Nichts gefunden für „%1$s“</string>
+    <string name="search_documents">Dokumente suchen</string>
+    <string name="sort_by">Sortieren nach</string>
+    <string name="sort_date_desc">Datum (neueste zuerst)</string>
+    <string name="sort_date_asc">Datum (älteste zuerst)</string>
+    <string name="sort_name_asc">Name (A–Z)</string>
+    <string name="sort_name_desc">Name (Z–A)</string>
+    <string name="sort_size_desc">Größe (größte zuerst)</string>
+    <string name="sort_size_asc">Größe (kleinste zuerst)</string>
+
+    <string name="select">Auswählen</string>
+    <string name="select_all">Alle auswählen</string>
+    <string name="selected_count">%1$d ausgewählt</string>
+    <string name="merge">Zusammenführen</string>
+    <string name="merging">Wird zusammengeführt…</string>
+    <string name="add_external_pdfs">PDFs hinzufügen</string>
+    <string name="external_pdf_label">Externes PDF</string>
+    <string name="external_pdf_fallback_name">Externes PDF %1$d</string>
+    <string name="merge_order_title">Reihenfolge</string>
+    <string name="merge_order_subtitle">Lege die Reihenfolge der PDFs fest</string>
+
+    <string name="delete_document_title">Dokument löschen?</string>
+    <string name="delete_document_text">„%1$s“ wird endgültig gelöscht.</string>
+    <plurals name="delete_selected_title">
+        <item quantity="one">%1$d Dokument löschen?</item>
+        <item quantity="other">%1$d Dokumente löschen?</item>
+    </plurals>
+    <string name="delete_selected_text">Die ausgewählten Dokumente werden endgültig gelöscht. Externe PDFs bleiben unverändert.</string>
+    <string name="delete">Löschen</string>
+    <string name="cancel">Abbrechen</string>
+    <string name="close">Schließen</string>
+    <string name="more_actions">Weitere Aktionen</string>
+    <string name="pdf_preview">PDF-Vorschau</string>
+    <string name="open">Öffnen</string>
+    <string name="share">Teilen</string>
+    <string name="rename">Umbenennen</string>
+    <string name="file_name">Dateiname</string>
+    <string name="pages">Seiten verwalten</string>
+    <string name="move_pages">Seiten verwalten</string>
+    <string name="loading_pages">Seiten werden geladen…</string>
+    <string name="single_page_pdf">Dieses PDF hat nur eine Seite.</string>
+    <string name="could_not_load_pdf">Dieses PDF konnte nicht geladen werden.</string>
+    <string name="page_number">Seite %1$d</string>
+    <string name="page_x_of_y">Seite %1$d von %2$d</string>
+    <string name="up">Nach oben</string>
+    <string name="down">Nach unten</string>
+    <string name="delete_page">Seite löschen</string>
+    <string name="saving">Wird gespeichert…</string>
+    <string name="save">Speichern</string>
+    <string name="share_pdf_chooser">PDF teilen</string>
+    <string name="open_pdf_chooser">PDF öffnen</string>
+    <string name="no_pdf_app">Keine App zum Öffnen von PDFs gefunden</string>
+
+    <string name="toast_merge_success">PDFs zusammengeführt</string>
+    <string name="toast_merge_failed">Zusammenführen fehlgeschlagen</string>
+    <string name="toast_deleted">Gelöscht</string>
+    <string name="toast_delete_failed">Löschen fehlgeschlagen</string>
+    <string name="toast_renamed">Umbenannt</string>
+    <string name="toast_rename_failed">Umbenennen fehlgeschlagen</string>
+    <string name="toast_pages_updated">Seiten aktualisiert</string>
+    <string name="toast_pages_update_failed">Seiten konnten nicht aktualisiert werden</string>
+
+    <string name="export_as">Exportieren als</string>
+    <string name="export_png">PNG – jede Seite als eigenes Bild</string>
+    <string name="export_html">HTML – Webseite mit eingebetteten Bildern</string>
+    <string name="export_docx">DOCX – Word-Dokument mit Seitenbildern</string>
+    <string name="exporting">Wird exportiert…</string>
+    <string name="export_png_success">Seiten in Downloads/PDFScanner gespeichert</string>
+    <string name="export_html_success">HTML in Downloads/PDFScanner gespeichert</string>
+    <string name="export_docx_success">DOCX in Downloads/PDFScanner gespeichert</string>
+    <string name="export_failed">Export fehlgeschlagen</string>
+
+    <string name="scan_mode">Scan-Verbesserung</string>
+    <string name="scan_mode_original">Original</string>
+    <string name="scan_mode_document">Dokument</string>
+    <string name="scan_mode_black_white">Schwarzweiß</string>
+    <string name="scan_mode_original_description">Lässt die Seiten genau so, wie der Scanner sie liefert.</string>
+    <string name="scan_mode_document_description">Entfernt Schatten, macht das Papier weiß und den Text kräftiger. Farben bleiben erhalten.</string>
+    <string name="scan_mode_black_white_description">Reiner schwarzer Text auf weißem Papier. Am besten für reine Textdokumente.</string>
+
+    <string name="theme_mode">Design</string>
+    <string name="theme_system">System</string>
+    <string name="theme_light">Hell</string>
+    <string name="theme_dark">Dunkel</string>
+
+    <string name="file_name_template">Dateinamen-Vorlage</string>
+    <string name="file_name_template_description">Lege den Standardnamen für gescannte PDFs fest. Tippe auf die Bausteine, um sie an der Cursorposition einzufügen.</string>
+    <string name="file_name_pattern">Dateinamen-Muster</string>
+    <string name="preview_file_name">Vorschau: %1$s.pdf</string>
+    <string name="date_tokens">Datums-Bausteine</string>
+    <string name="time_tokens">Zeit-Bausteine</string>
+    <string name="reset_to_default">Zurücksetzen</string>
+    <string name="token_year_long">Jahr (2026)</string>
+    <string name="token_year_short">Jahr (26)</string>
+    <string name="token_month_number">Monat (03)</string>
+    <string name="token_month_short">Monat (Mär)</string>
+    <string name="token_month_long">Monat (März)</string>
+    <string name="token_day">Tag (09)</string>
+    <string name="token_hour">Stunde (14)</string>
+    <string name="token_minute">Minute (05)</string>
+    <string name="token_second">Sekunde (30)</string>
+
+    <string name="onboarding_title">Willkommen bei PDF Scanner</string>
+    <string name="onboarding_text">Scanne Dokumente und verwalte deine PDFs an einem Ort. Halte ein Dokument gedrückt, um mehrere auszuwählen und sie zusammenzuführen, zu teilen oder zu löschen.</string>
+    <string name="got_it">Verstanden</string>
+</resources>

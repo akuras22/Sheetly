@@ -132,10 +132,12 @@ internal fun JSONObject.findApkAssetUrl(owner: String, repo: String): String? {
             continue
         }
 
+        // CI publishes app-release-unsigned-signed.apk, so only the end of the name is meaningful.
         val lowerName = name.lowercase()
         when {
-            lowerName.contains("signed") -> if (preferredSigned == null) preferredSigned = browserUrl
-            !lowerName.contains("unsigned") -> if (preferredRegular == null) preferredRegular = browserUrl
+            lowerName.endsWith("unsigned.apk") -> continue
+            lowerName.endsWith("signed.apk") -> if (preferredSigned == null) preferredSigned = browserUrl
+            else -> if (preferredRegular == null) preferredRegular = browserUrl
         }
     }
     return preferredSigned ?: preferredRegular
@@ -147,7 +149,7 @@ internal fun isTrustedApkUrl(url: String, owner: String, repo: String): Boolean 
     val host = uri.host.lowercase(Locale.ROOT)
     if (host == "github.com") {
         val path = uri.path.lowercase(Locale.ROOT)
-        return path.contains("/$owner/$repo/releases/download/".lowercase(Locale.ROOT))
+        return path.startsWith("/$owner/$repo/releases/download/".lowercase(Locale.ROOT))
     }
     return host == "objects.githubusercontent.com"
 }

@@ -6,22 +6,46 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.graphics.Matrix
-import android.graphics.pdf.PdfDocument
+import android.graphics.ImageDecoder
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
+import android.text.TextUtils
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.runtime.Immutable
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.io.MemoryUsageSetting
+import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlin.math.sqrt
 
 /** Render PDF pages at this multiple of their native size to preserve quality (~216 DPI). */
 private const val RENDER_SCALE = 3
+/** Upper bound for a single rendered page, so oversized pages cannot exhaust the heap. */
+private const val MAX_RENDER_PIXELS = 16_000_000L
+private const val THUMBNAIL_WIDTH_PX = 240
+/** Long edge of a scanned page, roughly 360 DPI on A4. */
+private const val SCAN_MAX_LONG_SIDE_PX = 4200
+private const val SCAN_JPEG_QUALITY = 0.9f
+/** Scan pages are sized like A4 on their long edge. */
+private const val SCAN_PAGE_LONG_SIDE_PT = 842f
+private const val MAX_FILE_NAME_LENGTH = 60
+private const val PDF_MIME_TYPE = "application/pdf"
+private const val DOWNLOADS_SUBFOLDER = "PDFScanner"
 private const val TAG = "PdfStorage"
 
 enum class PdfSortOrder {
@@ -33,6 +57,7 @@ enum class PdfSortOrder {
     SIZE_ASC,
 }
 
+@Immutable
 data class SavedPdf(
     val name: String,
     val uri: Uri,
@@ -41,44 +66,177 @@ data class SavedPdf(
     val dateAdded: Long = 0L,
 )
 
+@Immutable
+data class PdfPreview(
+    val thumbnail: Bitmap?,
+    val pageCount: Int?,
+)
+
 object PdfStorage {
-    fun savePdfToDownloads(context: Context, sourceUri: Uri, pattern: String): Uri? {
+    private val downloadsPath = "${Environment.DIRECTORY_DOWNLOADS}/$DOWNLOADS_SUBFOLDER"
+
+    private val downloadsCollection: Uri
+        get() = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+
+    /** Creates a pending Downloads entry, publishes it on success and removes it on any failure. */
+    private inline fun writeToDownloads(
+        context: Context,
+        fileName: String,
+        mimeType: String,
+        relativePath: String = downloadsPath,
+        write: (OutputStream) -> Unit,
+    ): Uri? {
         val resolver = context.contentResolver
-        val fileName = "${resolveFileName(pattern)}.pdf"
-        val destinationUri = resolver.insert(
-            MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+        val uri = resolver.insert(
+            downloadsCollection,
             ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(MediaStore.MediaColumns.MIME_TYPE, "application/pdf")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/PDFScanner")
+                put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
         ) ?: return null
 
         return try {
-            resolver.openInputStream(sourceUri).use { input ->
-                resolver.openOutputStream(destinationUri).use { output ->
-                    if (input == null || output == null) {
-                        resolver.delete(destinationUri, null, null)
-                        return null
-                    }
-                    input.copyTo(output)
-                }
-            }
-            resolver.update(destinationUri, ContentValues().apply {
+            val output = resolver.openOutputStream(uri) ?: throw IOException("No output stream for $uri")
+            output.use { write(it) }
+            resolver.update(uri, ContentValues().apply {
                 put(MediaStore.MediaColumns.IS_PENDING, 0)
             }, null, null)
-            destinationUri
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to save scanned PDF", e)
-            resolver.delete(destinationUri, null, null)
+            uri
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write $fileName", e)
+            resolver.delete(uri, null, null)
             null
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "Out of memory while writing $fileName", e)
+            resolver.delete(uri, null, null)
+            null
+        }
+    }
+
+    private inline fun <T> withRenderer(context: Context, uri: Uri, block: (PdfRenderer) -> T): T? {
+        return context.contentResolver.openFileDescriptor(uri, "r")?.use { fd ->
+            PdfRenderer(fd).use(block)
+        }
+    }
+
+    private fun PdfRenderer.Page.renderToBitmap(targetWidth: Int, targetHeight: Int, mode: Int): Bitmap {
+        return Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888).also { bitmap ->
+            bitmap.eraseColor(Color.WHITE)
+            render(bitmap, null, null, mode)
+        }
+    }
+
+    private fun PdfRenderer.Page.renderToWidth(targetWidth: Int): Bitmap {
+        val clampedWidth = maxOf(targetWidth, 1)
+        val targetHeight = (clampedWidth * height.toFloat() / maxOf(width, 1)).toInt().coerceAtLeast(1)
+        return renderToBitmap(clampedWidth, targetHeight, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+    }
+
+    /** Renders a page at export quality, scaled down when it would exceed [MAX_RENDER_PIXELS]. */
+    private fun PdfRenderer.renderForExport(pageIndex: Int): Bitmap {
+        return openPage(pageIndex).use { page ->
+            val (targetWidth, targetHeight) = exportSize(page.width, page.height)
+            page.renderToBitmap(targetWidth, targetHeight, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+        }
+    }
+
+    private fun exportSize(pageWidth: Int, pageHeight: Int): Pair<Int, Int> {
+        val width = maxOf(pageWidth, 1)
+        val height = maxOf(pageHeight, 1)
+        val pixels = width.toLong() * height
+        val scale = minOf(RENDER_SCALE.toDouble(), sqrt(MAX_RENDER_PIXELS.toDouble() / pixels))
+        return (width * scale).toInt().coerceAtLeast(1) to (height * scale).toInt().coerceAtLeast(1)
+    }
+
+    private fun exportFileName(baseName: String): String {
+        return sanitizeFileName(baseName.take(MAX_FILE_NAME_LENGTH), fallback = "export")
+    }
+
+    fun savePdfToDownloads(context: Context, sourceUri: Uri, pattern: String): Uri? {
+        val fileName = "${sanitizeFileName(resolveFileName(pattern))}.pdf"
+        return writeToDownloads(context, fileName, PDF_MIME_TYPE) { output ->
+            val input = context.contentResolver.openInputStream(sourceUri)
+                ?: throw IOException("Cannot read $sourceUri")
+            input.use { it.copyTo(output) }
+        }
+    }
+
+    /**
+     * Builds a PDF from the scanner's page images. In [ScanMode.ORIGINAL] the JPEGs are embedded
+     * unchanged, the other modes run them through [ScanEnhancer] first.
+     */
+    fun saveScanToDownloads(context: Context, pageUris: List<Uri>, mode: ScanMode, pattern: String): Uri? {
+        if (pageUris.isEmpty()) return null
+        PDFBoxResourceLoader.init(context.applicationContext)
+        val fileName = "${sanitizeFileName(resolveFileName(pattern))}.pdf"
+        return writeToDownloads(context, fileName, PDF_MIME_TYPE) { output ->
+            PDDocument(MemoryUsageSetting.setupTempFileOnly()).use { document ->
+                pageUris.forEach { pageUri ->
+                    val image = if (mode == ScanMode.ORIGINAL) {
+                        val input = context.contentResolver.openInputStream(pageUri)
+                            ?: throw IOException("Cannot read $pageUri")
+                        input.use { JPEGFactory.createFromStream(document, it) }
+                    } else {
+                        enhancedPageImage(context, document, pageUri, mode)
+                    }
+                    addImagePage(document, image)
+                }
+                document.save(output)
+            }
+        }
+    }
+
+    private fun enhancedPageImage(
+        context: Context,
+        document: PDDocument,
+        pageUri: Uri,
+        mode: ScanMode,
+    ): PDImageXObject {
+        val bitmap = decodeScanPage(context, pageUri)
+        try {
+            val width = bitmap.width
+            val height = bitmap.height
+            val pixels = IntArray(width * height)
+            bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+            ScanEnhancer.enhance(pixels, width, height, mode)
+            bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
+            return JPEGFactory.createFromImage(document, bitmap, SCAN_JPEG_QUALITY)
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    private fun decodeScanPage(context: Context, pageUri: Uri): Bitmap {
+        val source = ImageDecoder.createSource(context.contentResolver, pageUri)
+        val bitmap = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            decoder.isMutableRequired = true
+            val longSide = maxOf(info.size.width, info.size.height)
+            if (longSide > SCAN_MAX_LONG_SIDE_PX) {
+                val scale = SCAN_MAX_LONG_SIDE_PX.toFloat() / longSide
+                decoder.setTargetSize((info.size.width * scale).toInt(), (info.size.height * scale).toInt())
+            }
+        }
+        bitmap.setHasAlpha(false)
+        return bitmap
+    }
+
+    private fun addImagePage(document: PDDocument, image: PDImageXObject) {
+        val scale = SCAN_PAGE_LONG_SIDE_PT / maxOf(image.width, image.height)
+        val pageWidth = image.width * scale
+        val pageHeight = image.height * scale
+        val page = PDPage(PDRectangle(pageWidth, pageHeight))
+        document.addPage(page)
+        PDPageContentStream(document, page).use { content ->
+            content.drawImage(image, 0f, 0f, pageWidth, pageHeight)
         }
     }
 
     fun querySavedPdfs(context: Context, sortOrder: PdfSortOrder = PdfSortOrder.DATE_DESC): List<SavedPdf> {
         val resolver = context.contentResolver
-        val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val collection = downloadsCollection
         val items = mutableListOf<SavedPdf>()
         val sort = when (sortOrder) {
             PdfSortOrder.DATE_DESC -> "${MediaStore.MediaColumns.DATE_ADDED} DESC"
@@ -98,7 +256,7 @@ object PdfStorage {
                     MediaStore.MediaColumns.DATE_ADDED
                 ),
                 "${MediaStore.MediaColumns.MIME_TYPE}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?",
-                arrayOf("application/pdf", "${Environment.DIRECTORY_DOWNLOADS}/PDFScanner/"),
+                arrayOf(PDF_MIME_TYPE, "$downloadsPath/"),
                 sort
             )?.use { cursor ->
                 val idIdx = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
@@ -123,13 +281,13 @@ object PdfStorage {
     }
 
     fun renamePdf(context: Context, uri: Uri, newNameRaw: String): Boolean {
-        val newName = newNameRaw.trim().let { if (it.endsWith(".pdf", true)) it else "$it.pdf" }
-        if (newName.isBlank()) return false
+        val baseName = sanitizeFileName(newNameRaw.trim().removeSuffix(".pdf").removeSuffix(".PDF"), fallback = "")
+        if (baseName.isEmpty()) return false
         return try {
             context.contentResolver.update(
                 uri,
                 ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, newName)
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.pdf")
                 },
                 null,
                 null
@@ -140,104 +298,77 @@ object PdfStorage {
         }
     }
 
+    /** Merges without re-rendering, so text, image quality and file size of the sources are kept. */
     fun mergePdfsToDownloads(context: Context, sourceUris: List<Uri>, pattern: String): Uri? {
         if (sourceUris.size < 2) return null
-        val resolver = context.contentResolver
-        val fileName = "${resolveFileName(pattern)}_merged.pdf"
-        val destinationUri = resolver.insert(
-            MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
-            ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(MediaStore.MediaColumns.MIME_TYPE, "application/pdf")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/PDFScanner")
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
+        PDFBoxResourceLoader.init(context.applicationContext)
+        val fileName = "${sanitizeFileName(resolveFileName(pattern))}_merged.pdf"
+        return writeToDownloads(context, fileName, PDF_MIME_TYPE) { output ->
+            val inputs = mutableListOf<InputStream>()
+            try {
+                val merger = PDFMergerUtility()
+                sourceUris.forEach { sourceUri ->
+                    val input = context.contentResolver.openInputStream(sourceUri)
+                        ?: throw IOException("Cannot read $sourceUri")
+                    inputs += input
+                    merger.addSource(input)
+                }
+                merger.destinationStream = output
+                merger.mergeDocuments(MemoryUsageSetting.setupTempFileOnly())
+            } finally {
+                inputs.forEach { it.close() }
             }
-        ) ?: return null
-
-        val mergedDocument = PdfDocument()
-        return try {
-            var outputPageNumber = 0
-            sourceUris.forEach { sourceUri ->
-                outputPageNumber = appendPdfPages(context, mergedDocument, sourceUri, outputPageNumber)
-            }
-            if (outputPageNumber == 0) {
-                resolver.delete(destinationUri, null, null)
-                return null
-            }
-            resolver.openOutputStream(destinationUri)?.use { output ->
-                mergedDocument.writeTo(output)
-            } ?: run {
-                resolver.delete(destinationUri, null, null)
-                return null
-            }
-            resolver.update(destinationUri, ContentValues().apply {
-                put(MediaStore.MediaColumns.IS_PENDING, 0)
-            }, null, null)
-            destinationUri
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to merge PDFs", e)
-            resolver.delete(destinationUri, null, null)
-            null
-        } finally {
-            mergedDocument.close()
         }
     }
 
+    /**
+     * Rewrites the PDF with only the pages in [pageOrder], in that order. The original is kept
+     * in the cache until the new content is written, so a failed write can restore it.
+     */
     fun reorderPdfPages(context: Context, targetUri: Uri, pageOrder: List<Int>): Boolean {
-        if (pageOrder.isEmpty()) return false
-        val tempFile = try {
-            File.createTempFile("reordered_", ".pdf", context.cacheDir)
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to create temp file for reordering", e)
-            return false
-        }
-        val document = PdfDocument()
-        val scaleMatrix = Matrix().apply { setScale(1f / RENDER_SCALE, 1f / RENDER_SCALE) }
+        if (pageOrder.isEmpty() || pageOrder.distinct().size != pageOrder.size) return false
+        PDFBoxResourceLoader.init(context.applicationContext)
+        val resolver = context.contentResolver
+        val original = File.createTempFile("original_", ".pdf", context.cacheDir)
+        val edited = File.createTempFile("edited_", ".pdf", context.cacheDir)
         return try {
-            val sourceFd = context.contentResolver.openFileDescriptor(targetUri, "r") ?: return false
-            sourceFd.use { fd ->
-                PdfRenderer(fd).use { renderer ->
-                    if (pageOrder.distinct().size != pageOrder.size || pageOrder.any { it !in 0 until renderer.pageCount }) {
-                        return false
-                    }
-                    var outputPageNumber = 0
-                    pageOrder.forEach { sourcePageIndex ->
-                        renderer.openPage(sourcePageIndex).use { page ->
-                            val width = maxOf(page.width, 1)
-                            val height = maxOf(page.height, 1)
-                            val bitmap = Bitmap.createBitmap(width * RENDER_SCALE, height * RENDER_SCALE, Bitmap.Config.ARGB_8888)
-                            bitmap.eraseColor(Color.WHITE)
-                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
-                            val pageInfo = PdfDocument.PageInfo.Builder(width, height, outputPageNumber + 1).create()
-                            val newPage = document.startPage(pageInfo)
-                            newPage.canvas.drawColor(Color.WHITE)
-                            newPage.canvas.drawBitmap(bitmap, scaleMatrix, null)
-                            document.finishPage(newPage)
-                            bitmap.recycle()
-                            outputPageNumber++
-                        }
-                    }
+            val input = resolver.openInputStream(targetUri) ?: return false
+            input.use { source -> original.outputStream().use(source::copyTo) }
+
+            PDDocument.load(original, MemoryUsageSetting.setupTempFileOnly()).use { source ->
+                if (pageOrder.any { it !in 0 until source.numberOfPages }) return false
+                PDDocument().use { result ->
+                    pageOrder.forEach { pageIndex -> result.importPage(source.getPage(pageIndex)) }
+                    result.save(edited)
                 }
             }
-            tempFile.outputStream().use(document::writeTo)
-            context.contentResolver.openOutputStream(targetUri, "wt")?.use { output ->
-                tempFile.inputStream().use { input -> input.copyTo(output) }
-            } ?: return false
+
+            try {
+                overwrite(context, targetUri, edited)
+            } catch (e: IOException) {
+                Log.e(TAG, "Failed to replace PDF, restoring original", e)
+                overwrite(context, targetUri, original)
+                return false
+            }
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to reorder PDF pages", e)
             false
         } finally {
-            document.close()
-            tempFile.delete()
+            original.delete()
+            edited.delete()
         }
+    }
+
+    private fun overwrite(context: Context, targetUri: Uri, source: File) {
+        val output = context.contentResolver.openOutputStream(targetUri, "wt")
+            ?: throw IOException("Cannot write $targetUri")
+        output.use { target -> source.inputStream().use { it.copyTo(target) } }
     }
 
     fun getPdfPageOrder(context: Context, uri: Uri): List<Int> {
         return try {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { fd ->
-                PdfRenderer(fd).use { renderer -> List(renderer.pageCount) { it } }
-            } ?: emptyList()
+            withRenderer(context, uri) { renderer -> List(renderer.pageCount) { it } } ?: emptyList()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to read PDF page order", e)
             emptyList()
@@ -246,9 +377,7 @@ object PdfStorage {
 
     fun countPdfPages(context: Context, uri: Uri): Int? {
         return try {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { fd ->
-                PdfRenderer(fd).use { it.pageCount }
-            }
+            withRenderer(context, uri) { it.pageCount }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to count PDF pages", e)
             null
@@ -257,18 +386,9 @@ object PdfStorage {
 
     fun renderPdfPage(context: Context, uri: Uri, pageIndex: Int, width: Int = 900): Bitmap? {
         return try {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { fd ->
-                PdfRenderer(fd).use { renderer ->
-                    if (pageIndex !in 0 until renderer.pageCount) return null
-                    renderer.openPage(pageIndex).use { page ->
-                        val clampedWidth = maxOf(width, 1)
-                        val height = (clampedWidth * page.height.toFloat() / maxOf(page.width, 1)).toInt().coerceAtLeast(1)
-                        Bitmap.createBitmap(clampedWidth, height, Bitmap.Config.ARGB_8888).also { bitmap ->
-                            bitmap.eraseColor(Color.WHITE)
-                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        }
-                    }
-                }
+            withRenderer(context, uri) { renderer ->
+                if (pageIndex !in 0 until renderer.pageCount) return null
+                renderer.openPage(pageIndex).use { page -> page.renderToWidth(width) }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to render PDF page", e)
@@ -276,30 +396,26 @@ object PdfStorage {
         }
     }
 
-    fun renderPdfThumbnail(context: Context, uri: Uri): Bitmap? {
+    /** Thumbnail and page count from one renderer, so a list item only opens its PDF once. */
+    fun loadPreview(context: Context, uri: Uri): PdfPreview {
         return try {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { fd ->
-                PdfRenderer(fd).use { renderer ->
-                    if (renderer.pageCount == 0) return null
-                    renderer.openPage(0).use { page ->
-                        val width = 300
-                        val height = (width * page.height.toFloat() / maxOf(page.width, 1)).toInt().coerceAtLeast(1)
-                        Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
-                            bitmap.eraseColor(Color.WHITE)
-                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        }
-                    }
+            withRenderer(context, uri) { renderer ->
+                val thumbnail = if (renderer.pageCount > 0) {
+                    renderer.openPage(0).use { page -> page.renderToWidth(THUMBNAIL_WIDTH_PX) }
+                } else {
+                    null
                 }
-            }
+                PdfPreview(thumbnail, renderer.pageCount)
+            } ?: PdfPreview(null, null)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to render PDF thumbnail", e)
-            null
+            Log.e(TAG, "Failed to load PDF preview", e)
+            PdfPreview(null, null)
         }
     }
 
     fun sharePdf(context: Context, uri: Uri, name: String) {
         val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/pdf"
+            type = PDF_MIME_TYPE
             putExtra(Intent.EXTRA_STREAM, uri)
             putExtra(Intent.EXTRA_SUBJECT, name)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -307,34 +423,21 @@ object PdfStorage {
         context.startActivity(Intent.createChooser(intent, context.getString(R.string.share_pdf_chooser)))
     }
 
+    /** [context] must be an Activity context, the chooser is started without a new task. */
     fun sharePdfs(context: Context, items: List<SavedPdf>) {
         if (items.isEmpty()) return
         val uris = ArrayList(items.map { it.uri })
         val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-            type = "application/pdf"
+            type = PDF_MIME_TYPE
             putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         context.startActivity(Intent.createChooser(intent, context.getString(R.string.share_pdf_chooser)))
     }
 
-    fun copyPdfToUri(context: Context, sourceUri: Uri, destinationUri: Uri): Boolean {
-        return try {
-            context.contentResolver.openInputStream(sourceUri)?.use { input ->
-                context.contentResolver.openOutputStream(destinationUri, "wt")?.use { output ->
-                    input.copyTo(output)
-                    true
-                }
-            } ?: false
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to copy PDF via SAF", e)
-            false
-        }
-    }
-
     fun openPdf(context: Context, uri: Uri) {
         val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/pdf")
+            setDataAndType(uri, PDF_MIME_TYPE)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         try {
@@ -348,7 +451,7 @@ object PdfStorage {
     fun deletePdf(context: Context, uri: Uri): Boolean {
         return try {
             context.contentResolver.delete(uri, null, null) > 0
-        } catch (e: SecurityException) {
+        } catch (e: Exception) {
             Log.e(TAG, "Failed to delete PDF", e)
             false
         }
@@ -357,51 +460,36 @@ object PdfStorage {
     /**
      * Exports every page of the PDF as a separate PNG file into a sub-folder
      * Downloads/PDFScanner/<baseName>/.
-     * Returns the number of pages exported, or -1 on failure.
+     * Returns the number of pages exported.
      */
     fun exportPdfAsPngs(context: Context, uri: Uri, baseName: String): Int {
-        val resolver = context.contentResolver
+        val safeName = exportFileName(baseName)
         var count = 0
-        return try {
-            resolver.openFileDescriptor(uri, "r")?.use { fd ->
-                PdfRenderer(fd).use { renderer ->
-                    for (pageIndex in 0 until renderer.pageCount) {
-                        renderer.openPage(pageIndex).use { page ->
-                            val w = maxOf(page.width, 1)
-                            val h = maxOf(page.height, 1)
-                            val bitmap = Bitmap.createBitmap(w * RENDER_SCALE, h * RENDER_SCALE, Bitmap.Config.ARGB_8888)
-                            bitmap.eraseColor(Color.WHITE)
-                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
-                            val imgName = "${baseName}_page${pageIndex + 1}.png"
-                            val imgUri = resolver.insert(
-                                MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
-                                ContentValues().apply {
-                                    put(MediaStore.MediaColumns.DISPLAY_NAME, imgName)
-                                    put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
-                                    put(MediaStore.MediaColumns.RELATIVE_PATH,
-                                        "${Environment.DIRECTORY_DOWNLOADS}/PDFScanner/$baseName")
-                                    put(MediaStore.MediaColumns.IS_PENDING, 1)
-                                }
-                            )
-                            if (imgUri != null) {
-                                resolver.openOutputStream(imgUri)?.use { out ->
-                                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-                                }
-                                resolver.update(imgUri, ContentValues().apply {
-                                    put(MediaStore.MediaColumns.IS_PENDING, 0)
-                                }, null, null)
-                                count++
-                            }
-                            bitmap.recycle()
+        try {
+            withRenderer(context, uri) { renderer ->
+                for (pageIndex in 0 until renderer.pageCount) {
+                    val bitmap = renderer.renderForExport(pageIndex)
+                    try {
+                        val saved = writeToDownloads(
+                            context,
+                            "${safeName}_page${pageIndex + 1}.png",
+                            "image/png",
+                            "$downloadsPath/$safeName"
+                        ) { output ->
+                            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
                         }
+                        if (saved != null) count++
+                    } finally {
+                        bitmap.recycle()
                     }
                 }
             }
-            count
         } catch (e: Exception) {
             Log.e(TAG, "Failed to export PDF as PNG", e)
-            if (count > 0) count else -1
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "Out of memory while exporting PDF as PNG", e)
         }
+        return count
     }
 
     /**
@@ -409,95 +497,44 @@ object PdfStorage {
      * Saved to Downloads/PDFScanner/<baseName>.html.
      */
     fun exportPdfAsHtml(context: Context, uri: Uri, baseName: String): Boolean {
-        val resolver = context.contentResolver
-        return try {
-            val sb = StringBuilder()
-            sb.append("<!DOCTYPE html><html><head><meta charset='UTF-8'>")
-            sb.append("<title>").append(baseName).append("</title>")
-            sb.append("<style>body{margin:0;background:#888;padding:12px}")
-            sb.append("img{display:block;margin:10px auto;max-width:100%;")
-            sb.append("box-shadow:0 2px 8px rgba(0,0,0,.4)}</style></head><body>")
-            resolver.openFileDescriptor(uri, "r")?.use { fd ->
-                PdfRenderer(fd).use { renderer ->
-                    for (pageIndex in 0 until renderer.pageCount) {
-                        renderer.openPage(pageIndex).use { page ->
-                            val w = maxOf(page.width, 1)
-                            val h = maxOf(page.height, 1)
-                            val bitmap = Bitmap.createBitmap(w * RENDER_SCALE, h * RENDER_SCALE, Bitmap.Config.ARGB_8888)
-                            bitmap.eraseColor(Color.WHITE)
-                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
-                            val baos = ByteArrayOutputStream()
-                            bitmap.compress(Bitmap.CompressFormat.JPEG, 95, baos)
-                            bitmap.recycle()
-                            val b64 = android.util.Base64.encodeToString(
-                                baos.toByteArray(), android.util.Base64.NO_WRAP)
-                            sb.append("<img src='data:image/jpeg;base64,").append(b64)
-                                .append("' alt='Page ").append(pageIndex + 1).append("'>")
-                        }
-                    }
+        val safeName = exportFileName(baseName)
+        return writeToDownloads(context, "$safeName.html", "text/html") { output ->
+            val writer = output.bufferedWriter(Charsets.UTF_8)
+            writer.append("<!DOCTYPE html><html><head><meta charset='UTF-8'>")
+            writer.append("<title>").append(TextUtils.htmlEncode(safeName)).append("</title>")
+            writer.append("<style>body{margin:0;background:#888;padding:12px}")
+            writer.append("img{display:block;margin:10px auto;max-width:100%;")
+            writer.append("box-shadow:0 2px 8px rgba(0,0,0,.4)}</style></head><body>")
+            withRenderer(context, uri) { renderer ->
+                for (pageIndex in 0 until renderer.pageCount) {
+                    val bitmap = renderer.renderForExport(pageIndex)
+                    val jpeg = ByteArrayOutputStream()
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, jpeg)
+                    bitmap.recycle()
+                    val encoded = android.util.Base64.encodeToString(jpeg.toByteArray(), android.util.Base64.NO_WRAP)
+                    writer.append("<img src='data:image/jpeg;base64,").append(encoded)
+                        .append("' alt='Page ").append((pageIndex + 1).toString()).append("'>")
                 }
-            }
-            sb.append("</body></html>")
-            val htmlUri = resolver.insert(
-                MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
-                ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.html")
-                    put(MediaStore.MediaColumns.MIME_TYPE, "text/html")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH,
-                        "${Environment.DIRECTORY_DOWNLOADS}/PDFScanner")
-                    put(MediaStore.MediaColumns.IS_PENDING, 1)
-                }
-            ) ?: return false
-            resolver.openOutputStream(htmlUri)?.use { out ->
-                out.write(sb.toString().toByteArray(Charsets.UTF_8))
-            }
-            resolver.update(htmlUri, ContentValues().apply {
-                put(MediaStore.MediaColumns.IS_PENDING, 0)
-            }, null, null)
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to export PDF as HTML", e)
-            false
-        }
+            } ?: throw IOException("Cannot read $uri")
+            writer.append("</body></html>")
+            writer.flush()
+        } != null
     }
 
     /**
-     * Exports the PDF as a DOCX file where every page is an embedded PNG image.
+     * Exports the PDF as a DOCX file where every page is an embedded JPEG image. Pages are
+     * rendered one at a time so long documents do not have to fit in memory.
      * Saved to Downloads/PDFScanner/<baseName>.docx.
      */
     fun exportPdfAsDocx(context: Context, uri: Uri, baseName: String): Boolean {
-        val resolver = context.contentResolver
-        return try {
-            val pageBitmaps = mutableListOf<Bitmap>()
-            resolver.openFileDescriptor(uri, "r")?.use { fd ->
-                PdfRenderer(fd).use { renderer ->
-                    for (pageIndex in 0 until renderer.pageCount) {
-                        renderer.openPage(pageIndex).use { page ->
-                            val w = maxOf(page.width, 1)
-                            val h = maxOf(page.height, 1)
-                            val bitmap = Bitmap.createBitmap(w * RENDER_SCALE, h * RENDER_SCALE, Bitmap.Config.ARGB_8888)
-                            bitmap.eraseColor(Color.WHITE)
-                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
-                            pageBitmaps.add(bitmap)
-                        }
-                    }
+        val safeName = exportFileName(baseName)
+        val mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        return writeToDownloads(context, "$safeName.docx", mimeType) { output ->
+            withRenderer(context, uri) { renderer ->
+                if (renderer.pageCount == 0) throw IOException("PDF has no pages")
+                val pageSizes = List(renderer.pageCount) { pageIndex ->
+                    renderer.openPage(pageIndex).use { page -> exportSize(page.width, page.height) }
                 }
-            }
-            if (pageBitmaps.isEmpty()) return false
-
-            val docxUri = resolver.insert(
-                MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
-                ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.docx")
-                    put(MediaStore.MediaColumns.MIME_TYPE,
-                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH,
-                        "${Environment.DIRECTORY_DOWNLOADS}/PDFScanner")
-                    put(MediaStore.MediaColumns.IS_PENDING, 1)
-                }
-            ) ?: return false
-
-            resolver.openOutputStream(docxUri)?.use { output ->
                 ZipOutputStream(output).use { zip ->
                     zip.putNextEntry(ZipEntry("[Content_Types].xml"))
                     zip.write(buildContentTypesXml().toByteArray(Charsets.UTF_8))
@@ -508,38 +545,30 @@ object PdfStorage {
                     zip.closeEntry()
 
                     zip.putNextEntry(ZipEntry("word/_rels/document.xml.rels"))
-                    zip.write(buildDocRelsXml(pageBitmaps.size).toByteArray(Charsets.UTF_8))
+                    zip.write(buildDocRelsXml(pageSizes.size).toByteArray(Charsets.UTF_8))
                     zip.closeEntry()
 
                     zip.putNextEntry(ZipEntry("word/document.xml"))
-                    zip.write(buildDocumentXml(pageBitmaps).toByteArray(Charsets.UTF_8))
+                    zip.write(buildDocumentXml(pageSizes).toByteArray(Charsets.UTF_8))
                     zip.closeEntry()
 
-                    pageBitmaps.forEachIndexed { i, bitmap ->
-                        zip.putNextEntry(ZipEntry("word/media/page${i + 1}.png"))
-                        val baos = ByteArrayOutputStream()
-                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
-                        zip.write(baos.toByteArray())
+                    pageSizes.indices.forEach { pageIndex ->
+                        val bitmap = renderer.renderForExport(pageIndex)
+                        zip.putNextEntry(ZipEntry("word/media/page${pageIndex + 1}.jpg"))
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, zip)
                         zip.closeEntry()
                         bitmap.recycle()
                     }
                 }
-            }
-            resolver.update(docxUri, ContentValues().apply {
-                put(MediaStore.MediaColumns.IS_PENDING, 0)
-            }, null, null)
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to export PDF as DOCX", e)
-            false
-        }
+            } ?: throw IOException("Cannot read $uri")
+        } != null
     }
 
     private fun buildContentTypesXml(): String = buildString {
         append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>")
         append("<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">")
         append("<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>")
-        append("<Default Extension=\"png\" ContentType=\"image/png\"/>")
+        append("<Default Extension=\"jpg\" ContentType=\"image/jpeg\"/>")
         append("<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>")
         append("</Types>")
     }
@@ -555,13 +584,14 @@ object PdfStorage {
         append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>")
         append("<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">")
         for (i in 1..pageCount) {
-            append("<Relationship Id=\"rId$i\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/page$i.png\"/>")
+            append("<Relationship Id=\"rId$i\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/page$i.jpg\"/>")
         }
         append("</Relationships>")
     }
 
-    private fun buildDocumentXml(pages: List<Bitmap>): String = buildString {
+    private fun buildDocumentXml(pageSizes: List<Pair<Int, Int>>): String = buildString {
         val maxWidthEmu = 5_486_400L
+        val maxHeightEmu = 8_229_600L
         val pixToEmu = 9525L
         append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>")
         append("<w:document")
@@ -571,12 +601,16 @@ object PdfStorage {
         append(" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"")
         append(" xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">")
         append("<w:body>")
-        pages.forEachIndexed { i, bmp ->
-            var cx = bmp.width.toLong() * pixToEmu
-            var cy = bmp.height.toLong() * pixToEmu
+        pageSizes.forEachIndexed { i, (width, height) ->
+            var cx = width.toLong() * pixToEmu
+            var cy = height.toLong() * pixToEmu
             if (cx > maxWidthEmu) {
                 cy = (cy * maxWidthEmu / cx)
                 cx = maxWidthEmu
+            }
+            if (cy > maxHeightEmu) {
+                cx = (cx * maxHeightEmu / cy)
+                cy = maxHeightEmu
             }
             val rId = "rId${i + 1}"
             val imgId = i + 1
@@ -597,47 +631,12 @@ object PdfStorage {
             append("</pic:spPr></pic:pic>")
             append("</a:graphicData></a:graphic>")
             append("</wp:inline></w:drawing></w:r></w:p>")
-            if (i < pages.lastIndex) {
+            if (i < pageSizes.lastIndex) {
                 append("<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>")
             }
         }
         append("<w:sectPr/>")
         append("</w:body></w:document>")
-    }
-
-    private fun appendPdfPages(
-        context: Context,
-        targetDocument: PdfDocument,
-        sourceUri: Uri,
-        startPageNumber: Int,
-    ): Int {
-        var pageNumber = startPageNumber
-        val scaleMatrix = Matrix().apply { setScale(1f / RENDER_SCALE, 1f / RENDER_SCALE) }
-        try {
-            context.contentResolver.openFileDescriptor(sourceUri, "r")?.use { fd ->
-                PdfRenderer(fd).use { renderer ->
-                    for (pageIndex in 0 until renderer.pageCount) {
-                        renderer.openPage(pageIndex).use { page ->
-                            val width = maxOf(page.width, 1)
-                            val height = maxOf(page.height, 1)
-                            val bitmap = Bitmap.createBitmap(width * RENDER_SCALE, height * RENDER_SCALE, Bitmap.Config.ARGB_8888)
-                            bitmap.eraseColor(Color.WHITE)
-                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
-                            val pageInfo = PdfDocument.PageInfo.Builder(width, height, pageNumber + 1).create()
-                            val newPage = targetDocument.startPage(pageInfo)
-                            newPage.canvas.drawColor(Color.WHITE)
-                            newPage.canvas.drawBitmap(bitmap, scaleMatrix, null)
-                            targetDocument.finishPage(newPage)
-                            bitmap.recycle()
-                            pageNumber++
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to append PDF pages from $sourceUri", e)
-        }
-        return pageNumber
     }
 }
 

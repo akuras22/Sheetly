@@ -26,8 +26,8 @@ android {
         applicationId = "com.akuras.pdfscanner"
         minSdk = 34
         targetSdk = 35
-        versionCode = ciVersionCode ?: 4
-        versionName = ciVersionName ?: "1.9.5"
+        versionCode = ciVersionCode ?: 5
+        versionName = ciVersionName ?: "1.10.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -56,7 +56,8 @@ android {
             } else {
                 null
             }
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -99,10 +100,12 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
 
     implementation(libs.mlkit.document.scanner)
+    implementation(libs.pdfbox.android)
 
     implementation("com.google.android.material:material:1.12.0")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

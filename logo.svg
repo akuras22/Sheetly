@@ -1,65 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
-  <!-- Background circle (optional, can be removed for transparent) -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="18 18 72 72" width="192" height="192">
   <defs>
-    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#2563eb;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#1e40af;stop-opacity:1" />
+    <linearGradient id="bg" x1="0" y1="0" x2="108" y2="108" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0B8FA8"/>
+      <stop offset="1" stop-color="#004A5C"/>
     </linearGradient>
-    
-    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
-      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.15"/>
-    </filter>
   </defs>
-  
-  <!-- Rounded background -->
-  <rect width="192" height="192" rx="45" ry="45" fill="url(#grad1)"/>
-  
-  <!-- Document/PDF shape (back layer) -->
-  <g filter="url(#shadow)">
-    <!-- Paper/document body -->
-    <path d="M 50 30 L 90 30 L 100 40 L 100 140 C 100 145 96 150 90 150 L 50 150 C 44 150 40 145 40 140 L 40 40 C 40 35 44 30 50 30 Z" 
-          fill="white" opacity="0.95" stroke="none"/>
-    
-    <!-- PDF label on document -->
-    <text x="70" y="165" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#1e40af" text-anchor="middle">PDF</text>
-  </g>
-  
-  <!-- Camera lens (front layer, overlapping) -->
-  <g transform="translate(95, 75)">
-    <!-- Camera body (rounded rectangle) -->
-    <rect x="-28" y="-28" width="56" height="56" rx="12" ry="12" fill="#ffffff" opacity="0.98" filter="url(#shadow)"/>
-    
-    <!-- Outer lens circle -->
-    <circle cx="0" cy="0" r="20" fill="none" stroke="#1e40af" stroke-width="2"/>
-    
-    <!-- Inner lens gradient -->
-    <defs>
-      <radialGradient id="lensGrad" cx="35%" cy="35%">
-        <stop offset="0%" style="stop-color:#60a5fa;stop-opacity:0.8" />
-        <stop offset="100%" style="stop-color:#1e40af;stop-opacity:1" />
-      </radialGradient>
-    </defs>
-    <circle cx="0" cy="0" r="18" fill="url(#lensGrad)"/>
-    
-    <!-- Lens shine -->
-    <circle cx="-6" cy="-6" r="5" fill="white" opacity="0.4"/>
-    
-    <!-- Shutter blades (internal detail) -->
-    <g stroke="white" stroke-width="1.5" fill="none" opacity="0.6">
-      <line x1="0" y1="-12" x2="0" y2="12"/>
-      <line x1="-12" y1="0" x2="12" y2="0"/>
-      <line x1="-8" y1="-8" x2="8" y2="8"/>
-      <line x1="-8" y1="8" x2="8" y2="-8"/>
-    </g>
-    
-    <!-- Camera viewfinder top -->
-    <rect x="-26" y="-26" width="52" height="10" rx="2" fill="#1e40af" opacity="0.1"/>
-  </g>
-  
-  <!-- Subtle accent lines (scanning effect) -->
-  <g stroke="#ffffff" stroke-width="1.5" fill="none" opacity="0.5">
-    <path d="M 70 60 Q 85 65 95 60" stroke-linecap="round"/>
-    <path d="M 70 80 Q 85 85 95 80" stroke-linecap="round"/>
-    <path d="M 70 100 Q 85 105 95 100" stroke-linecap="round"/>
-  </g>
+  <rect x="18" y="18" width="72" height="72" rx="17" fill="url(#bg)"/>
+  <path d="M44 36.5H59L67 44.5V68.5A3 3 0 0 1 64 71.5H44A3 3 0 0 1 41 68.5V39.5A3 3 0 0 1 44 36.5Z" fill="#FFFFFF"/>
+  <path d="M59 36.5L67 44.5H61.5A2.5 2.5 0 0 1 59 42Z" fill="#B7DDE6"/>
+  <path d="M46 47.5H54M46 63.5H62" stroke="#9CC5D0" stroke-width="2.8" stroke-linecap="round" fill="none"/>
+  <path d="M35.5 55.5H72.5" stroke="#5EEBB5" stroke-width="4" stroke-linecap="round" fill="none"/>
+  <path d="M33.5 41.5V36.5A4.5 4.5 0 0 1 38 32H43M65 32H70A4.5 4.5 0 0 1 74.5 36.5V41.5M74.5 66.5V71.5A4.5 4.5 0 0 1 70 76H65M43 76H38A4.5 4.5 0 0 1 33.5 71.5V66.5" stroke="#FFFFFF" stroke-width="3.4" stroke-linecap="round" fill="none"/>
 </svg>

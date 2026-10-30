@@ -1,16 +1,20 @@
 package com.akuras.pdfscanner
 
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
+import android.util.LruCache
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,49 +31,63 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FileCopy
 import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Merge
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SearchOff
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Sort
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -79,95 +97,229 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
+import java.text.DateFormat
+import java.util.Date
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+private const val PAGE_ASPECT_RATIO = 0.707f
+private const val PAGE_ROW_PREVIEW_WIDTH_PX = 160
+private const val VIEWER_PAGE_WIDTH_PX = 1400
+private const val VIEWER_MAX_ZOOM = 5f
+private const val VIEWER_DOUBLE_TAP_ZOOM = 2.5f
+private const val PREVIEW_CACHE_ENTRIES = 60
+
+@OptIn(ExperimentalCoroutinesApi::class)
+private val previewDispatcher: CoroutineDispatcher = Dispatchers.IO.limitedParallelism(2)
+private val previewCache = LruCache<String, PdfPreview>(PREVIEW_CACHE_ENTRIES)
+
+/** Previews survive scrolling and recomposition, [seed] invalidates them after a PDF changes. */
+@Composable
+private fun rememberPdfPreview(uri: Uri, seed: Int): PdfPreview? {
+    val context = LocalContext.current.applicationContext
+    val key = remember(uri, seed) { "$uri#$seed" }
+    val preview by produceState<PdfPreview?>(initialValue = previewCache.get(key), key) {
+        if (value == null) {
+            value = withContext(previewDispatcher) {
+                PdfStorage.loadPreview(context, uri).also { previewCache.put(key, it) }
+            }
+        }
+    }
+    return preview
+}
+
 @Composable
 fun ScannerScreen(
-    refreshTrigger: Int,
     onScanClick: () -> Unit,
     onSettingsClick: () -> Unit,
     historyViewModel: HistoryViewModel = viewModel(),
 ) {
-    val background = MaterialTheme.colorScheme.surface
     val context = LocalContext.current
     val uiState = historyViewModel.uiState
-    var showSearch by remember { mutableStateOf(false) }
+    var showSearch by rememberSaveable { mutableStateOf(false) }
+    var showDeleteSelected by remember { mutableStateOf(false) }
+    var showMergePreview by remember { mutableStateOf(false) }
+    val selectedItems = uiState.selectedItems
+    val deletableCount = selectedItems.count { !it.isExternal }
 
-    LaunchedEffect(refreshTrigger) { historyViewModel.refresh() }
+    val closeSearch = {
+        showSearch = false
+        historyViewModel.setSearchQuery("")
+    }
+
+    val externalPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        val added = uris.mapIndexed { index, uri ->
+            try {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (e: Exception) {
+                android.util.Log.w("ScannerScreen", "Failed to persist read permission for $uri", e)
+            }
+            SavedPdf(
+                name = queryPdfDisplayName(context, uri)
+                    ?: context.getString(R.string.external_pdf_fallback_name, index + 1),
+                uri = uri,
+                isExternal = true,
+            )
+        }
+        historyViewModel.addExternal(added)
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { historyViewModel.refresh() }
     LaunchedEffect(historyViewModel) {
         historyViewModel.messages.collect { message ->
             Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
         }
     }
+    BackHandler(enabled = uiState.selectionMode) { historyViewModel.exitSelectionMode() }
+    BackHandler(enabled = showSearch && !uiState.selectionMode, onBack = closeSearch)
+
+    if (showDeleteSelected) {
+        AlertDialog(
+            onDismissRequest = { showDeleteSelected = false },
+            title = { Text(pluralStringResource(R.plurals.delete_selected_title, deletableCount, deletableCount)) },
+            text = { Text(stringResource(R.string.delete_selected_text)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteSelected = false
+                    historyViewModel.deleteSelected()
+                }) {
+                    Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteSelected = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
+
+    if (showMergePreview) {
+        MergePreviewDialog(
+            orderedItems = selectedItems,
+            thumbnailSeed = uiState.thumbnailSeed,
+            onDismiss = { showMergePreview = false },
+            onConfirm = { confirmedItems ->
+                showMergePreview = false
+                historyViewModel.merge(confirmedItems)
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        stringResource(R.string.app_name),
-                        fontWeight = FontWeight.Bold
-                    )
-                },
-                actions = {
-                    IconButton(onClick = onSettingsClick) {
-                        Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.settings))
+            if (uiState.selectionMode) {
+                TopAppBar(
+                    title = { Text(stringResource(R.string.selected_count, selectedItems.size)) },
+                    navigationIcon = {
+                        IconButton(onClick = historyViewModel::exitSelectionMode) {
+                            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.cancel))
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = historyViewModel::selectAll) {
+                            Icon(Icons.Default.SelectAll, contentDescription = stringResource(R.string.select_all))
+                        }
                     }
-                }
-            )
+                )
+            } else {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Text(
+                            stringResource(R.string.app_name),
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { if (showSearch) closeSearch() else showSearch = true }) {
+                            Icon(
+                                if (showSearch) Icons.Default.Close else Icons.Default.Search,
+                                contentDescription = stringResource(R.string.search_documents)
+                            )
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = onSettingsClick) {
+                            Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.settings))
+                        }
+                    }
+                )
+            }
+        },
+        bottomBar = {
+            if (uiState.selectionMode) {
+                SelectionActionsBar(
+                    canMerge = selectedItems.size >= 2 && !uiState.isMerging,
+                    canShare = selectedItems.isNotEmpty(),
+                    canDelete = deletableCount > 0,
+                    onMerge = { showMergePreview = true },
+                    onAddExternal = { externalPicker.launch(arrayOf("application/pdf")) },
+                    onShare = { PdfStorage.sharePdfs(context, selectedItems) },
+                    onDelete = { showDeleteSelected = true }
+                )
+            }
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = onScanClick,
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.navigationBarsPadding()
-            ) {
-                Icon(
-                    Icons.Default.CameraAlt,
-                    contentDescription = null,
-                    modifier = Modifier.size(22.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(stringResource(R.string.scan_document), style = MaterialTheme.typography.titleMedium)
+            if (!uiState.selectionMode) {
+                ExtendedFloatingActionButton(
+                    onClick = onScanClick,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.navigationBarsPadding()
+                ) {
+                    Icon(
+                        Icons.Default.DocumentScanner,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(stringResource(R.string.scan_document), style = MaterialTheme.typography.titleMedium)
+                }
             }
         }
     ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(background)
+                .background(MaterialTheme.colorScheme.surface)
                 .padding(padding),
             contentAlignment = Alignment.TopCenter
         ) {
             HistoryPanel(
                 uiState = uiState,
+                showSearch = showSearch && !uiState.selectionMode,
                 onSetSearch = historyViewModel::setSearchQuery,
                 onSetSort = historyViewModel::setSortOrder,
-                onToggleMergeMode = historyViewModel::toggleMergeMode,
+                onStartSelection = historyViewModel::enterSelectionMode,
                 onToggleSelection = historyViewModel::toggleSelection,
-                onMergeSelected = { pattern -> historyViewModel.mergeSelected(pattern) },
-                onShareSelected = historyViewModel::shareSelected,
-                onDeleteSelected = historyViewModel::deleteSelected,
                 onDelete = historyViewModel::delete,
                 onRename = historyViewModel::rename,
                 onReordered = historyViewModel::onReordered,
-                showSearch = showSearch,
-                onToggleSearch = { showSearch = !showSearch },
                 modifier = Modifier
                     .widthIn(max = 900.dp)
                     .padding(horizontal = 16.dp)
@@ -177,148 +329,119 @@ fun ScannerScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SelectionActionsBar(
+    canMerge: Boolean,
+    canShare: Boolean,
+    canDelete: Boolean,
+    onMerge: () -> Unit,
+    onAddExternal: () -> Unit,
+    onShare: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(vertical = 4.dp)
+        ) {
+            SelectionAction(Icons.Default.Merge, stringResource(R.string.merge), canMerge, onMerge)
+            SelectionAction(Icons.Default.UploadFile, stringResource(R.string.add_external_pdfs), true, onAddExternal)
+            SelectionAction(Icons.Default.Share, stringResource(R.string.share), canShare, onShare)
+            SelectionAction(Icons.Default.Delete, stringResource(R.string.delete), canDelete, onDelete)
+        }
+    }
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.SelectionAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f)
+    Column(
+        modifier = Modifier
+            .weight(1f)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(icon, contentDescription = null, tint = color)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            label,
+            color = color,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
 @Composable
 private fun HistoryPanel(
     uiState: HistoryUiState,
+    showSearch: Boolean,
     onSetSearch: (String) -> Unit,
     onSetSort: (PdfSortOrder) -> Unit,
-    onToggleMergeMode: () -> Unit,
+    onStartSelection: (Uri?) -> Unit,
     onToggleSelection: (Uri) -> Unit,
-    onMergeSelected: (String) -> Unit,
-    onShareSelected: () -> Unit,
-    onDeleteSelected: () -> Unit,
     onDelete: (Uri) -> Unit,
     onRename: (Uri, String) -> Unit,
     onReordered: (Boolean) -> Unit,
-    showSearch: Boolean,
-    onToggleSearch: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
-    val config = LocalConfiguration.current
-    val isWide = config.screenWidthDp > 600
-    val columns = if (isWide) 2 else 1
-    val selectedCount = uiState.selectedMergeUris.size
     var renameTarget by remember { mutableStateOf<SavedPdf?>(null) }
-    var previewTarget by remember { mutableStateOf<SavedPdf?>(null) }
-    var showMergePreview by remember { mutableStateOf(false) }
-    var externalMergeItems by remember { mutableStateOf(listOf<SavedPdf>()) }
-    val scope = rememberCoroutineScope()
-    val externalPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris ->
-        if (uris.isEmpty()) return@rememberLauncherForActivityResult
-        val resolver = context.contentResolver
-        val startIndex = externalMergeItems.size + 1
-        val added = uris.mapIndexed { index, uri ->
-            try {
-                resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            } catch (e: Exception) {
-                android.util.Log.w("HistoryPanel", "Failed to persist read permission for $uri", e)
-            }
-            SavedPdf(
-                name = queryPdfDisplayName(context, uri) ?: "External PDF ${startIndex + index}",
-                uri = uri,
-                isExternal = true,
-            )
-        }
-        externalMergeItems = (externalMergeItems + added).distinctBy { it.uri.toString() }
-        // Auto-select newly added external PDFs
-        val newKeys = added.map { it.uri.toString() }
-        newKeys.forEach { key ->
-            if (!uiState.selectedMergeUris.contains(key)) {
-                onToggleSelection(android.net.Uri.parse(key))
-            }
-        }
-    }
+    var viewerTarget by remember { mutableStateOf<SavedPdf?>(null) }
+    val selectedOrder = remember(uiState.selectedUris) { uiState.selectedUris.withIndex().associate { (index, key) -> key to index + 1 } }
 
-    if (renameTarget != null) {
+    renameTarget?.let { target ->
         RenamePdfDialog(
-            item = renameTarget!!,
+            item = target,
             onDismiss = { renameTarget = null },
             onRename = { newName ->
-                onRename(renameTarget!!.uri, newName)
+                onRename(target.uri, newName)
                 renameTarget = null
             }
         )
     }
-    if (previewTarget != null) {
-        PdfPreviewDialog(
-            item = previewTarget!!,
-            onDismiss = { previewTarget = null }
-        )
+    viewerTarget?.let { target ->
+        PdfViewerDialog(item = target, onDismiss = { viewerTarget = null })
     }
 
-    // Merge preview dialog
-    if (showMergePreview) {
-        val selectedItems = uiState.allItems.filter { 
-            uiState.selectedMergeUris.contains(it.uri.toString()) 
-        } + externalMergeItems.filter {
-            uiState.selectedMergeUris.contains(it.uri.toString())
-        }
-        val uniqueItems = selectedItems.distinctBy { it.uri.toString() }
-        MergePreviewDialog(
-            orderedItems = uniqueItems,
-            onDismiss = { showMergePreview = false },
-            onConfirm = { confirmedItems ->
-                showMergePreview = false
-                val mergeUris = confirmedItems.map { it.uri }
-                scope.launch {
-                    val pattern = loadFileNamePattern(context)
-                    val merged = withContext(Dispatchers.IO) {
-                        PdfStorage.mergePdfsToDownloads(context, mergeUris, pattern)
-                    }
-                    if (merged != null) {
-                        Toast.makeText(context, "PDFs merged", Toast.LENGTH_SHORT).show()
-                        onToggleMergeMode()
-                        externalMergeItems = emptyList()
-                    } else {
-                        Toast.makeText(context, "Merge failed", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-        )
-    }
-
-    Column(modifier = modifier.fillMaxSize().animateContentSize()) {
+    Column(modifier = modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = stringResource(R.string.saved_pdfs),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold
                 )
-                if (uiState.items.isNotEmpty()) {
+                if (uiState.allItems.isNotEmpty()) {
                     Text(
-                        text = stringResource(R.string.documents_count, uiState.items.size),
+                        text = pluralStringResource(R.plurals.documents_count, uiState.items.size, uiState.items.size),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
-            if (!uiState.mergeMode) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    IconButton(onClick = onToggleSearch) {
-                        Icon(
-                            Icons.Default.Search,
-                            contentDescription = stringResource(R.string.search_documents),
-                            tint = if (showSearch) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    SortDropdown(
-                        currentSort = uiState.sortOrder,
-                        onSortSelected = onSetSort
-                    )
+            if (!uiState.selectionMode && uiState.allItems.isNotEmpty()) {
+                IconButton(onClick = { onStartSelection(null) }) {
+                    Icon(Icons.Default.Checklist, contentDescription = stringResource(R.string.select))
                 }
+                SortDropdown(currentSort = uiState.sortOrder, onSortSelected = onSetSort)
             }
         }
         Spacer(modifier = Modifier.height(8.dp))
-        if (showSearch && !uiState.mergeMode) {
+        if (showSearch) {
             OutlinedTextField(
                 value = uiState.searchQuery,
                 onValueChange = onSetSearch,
@@ -330,147 +453,87 @@ private fun HistoryPanel(
             )
             Spacer(modifier = Modifier.height(8.dp))
         }
-        
-        // Compact merge mode action bar
-        if (uiState.mergeMode) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "$selectedCount selected",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        IconButton(
-                            onClick = { externalPicker.launch(arrayOf("application/pdf")) },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Description,
-                                contentDescription = "Add External",
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        IconButton(
-                            onClick = onShareSelected,
-                            enabled = selectedCount >= 1,
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Share,
-                                contentDescription = "Share",
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        IconButton(
-                            onClick = onDeleteSelected,
-                            enabled = selectedCount >= 1,
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = "Delete",
-                                modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.error
-                            )
-                        }
-                        IconButton(
-                            onClick = { 
-                                if (selectedCount >= 2) showMergePreview = true 
-                            },
-                            enabled = selectedCount >= 2 && !uiState.isMerging,
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.OpenInNew,
-                                contentDescription = "Merge",
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        IconButton(
-                            onClick = { 
-                                onToggleMergeMode()
-                                externalMergeItems = emptyList()
-                            },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = "Cancel",
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-        } else if (uiState.items.isNotEmpty()) {
-            Button(onClick = onToggleMergeMode) {
-                Text(stringResource(R.string.merge_pdfs))
-            }
+        if (uiState.isSavingScan || uiState.isMerging) {
+            Text(
+                stringResource(if (uiState.isMerging) R.string.merging else R.string.processing_scan),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             Spacer(modifier = Modifier.height(8.dp))
         }
 
-        if (uiState.items.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Default.Description,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        stringResource(R.string.no_scanned_documents),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        stringResource(R.string.tap_scan_to_start),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(columns),
+        when {
+            uiState.items.isNotEmpty() -> LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 340.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(bottom = 80.dp)
+                contentPadding = PaddingValues(bottom = 96.dp)
             ) {
-                items(uiState.items, key = { it.uri.toString() }) { item ->
+                items(uiState.items, key = { it.uri.toString() }, contentType = { "pdf" }) { item ->
+                    val selectionIndex = selectedOrder[item.uri.toString()]
                     PdfHistoryCard(
                         item = item,
-                        isWide = isWide,
-                        selectionMode = uiState.mergeMode,
-                        isSelected = uiState.selectedMergeUris.contains(item.uri.toString()),
+                        selectionMode = uiState.selectionMode,
+                        selectionIndex = selectionIndex,
                         thumbnailSeed = uiState.thumbnailSeed,
-                        onToggleSelected = { onToggleSelection(item.uri) },
+                        onClick = {
+                            if (uiState.selectionMode) onToggleSelection(item.uri) else viewerTarget = item
+                        },
+                        onLongClick = {
+                            if (uiState.selectionMode) onToggleSelection(item.uri) else onStartSelection(item.uri)
+                        },
                         onDeleted = onDelete,
-                        onRename = { renameTarget = it },
-                        onPreview = { previewTarget = it },
+                        onRename = { renameTarget = item },
                         onReordered = onReordered
                     )
                 }
             }
+            uiState.allItems.isNotEmpty() -> EmptyState(
+                icon = Icons.Default.SearchOff,
+                title = stringResource(R.string.no_search_results),
+                text = stringResource(R.string.no_search_results_hint, uiState.searchQuery.trim())
+            )
+            else -> EmptyState(
+                icon = Icons.Default.Description,
+                title = stringResource(R.string.no_scanned_documents),
+                text = stringResource(R.string.tap_scan_to_start)
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptyState(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    text: String,
+) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                icon,
+                contentDescription = null,
+                modifier = Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                textAlign = TextAlign.Center
+            )
         }
     }
 }
@@ -481,50 +544,36 @@ private fun SortDropdown(
     onSortSelected: (PdfSortOrder) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val options = listOf(
+        PdfSortOrder.DATE_DESC to R.string.sort_date_desc,
+        PdfSortOrder.DATE_ASC to R.string.sort_date_asc,
+        PdfSortOrder.NAME_ASC to R.string.sort_name_asc,
+        PdfSortOrder.NAME_DESC to R.string.sort_name_desc,
+        PdfSortOrder.SIZE_DESC to R.string.sort_size_desc,
+        PdfSortOrder.SIZE_ASC to R.string.sort_size_asc,
+    )
     Box {
-        TextButton(
-            onClick = { expanded = true },
-            contentPadding = PaddingValues(horizontal = 8.dp)
-        ) {
-            Icon(Icons.Default.Sort, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-                when (currentSort) {
-                    PdfSortOrder.DATE_DESC, PdfSortOrder.DATE_ASC -> "Date"
-                    PdfSortOrder.NAME_ASC, PdfSortOrder.NAME_DESC -> "Name"
-                    PdfSortOrder.SIZE_DESC, PdfSortOrder.SIZE_ASC -> "Size"
-                },
-                style = MaterialTheme.typography.labelMedium
-            )
+        IconButton(onClick = { expanded = true }) {
+            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = stringResource(R.string.sort_by))
         }
-        androidx.compose.material3.DropdownMenu(
+        DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false }
         ) {
-            DropdownMenuItem(
-                text = { Text("Date (newest first)") },
-                onClick = { onSortSelected(PdfSortOrder.DATE_DESC); expanded = false }
-            )
-            DropdownMenuItem(
-                text = { Text("Date (oldest first)") },
-                onClick = { onSortSelected(PdfSortOrder.DATE_ASC); expanded = false }
-            )
-            DropdownMenuItem(
-                text = { Text("Name (A-Z)") },
-                onClick = { onSortSelected(PdfSortOrder.NAME_ASC); expanded = false }
-            )
-            DropdownMenuItem(
-                text = { Text("Name (Z-A)") },
-                onClick = { onSortSelected(PdfSortOrder.NAME_DESC); expanded = false }
-            )
-            DropdownMenuItem(
-                text = { Text("Size (largest first)") },
-                onClick = { onSortSelected(PdfSortOrder.SIZE_DESC); expanded = false }
-            )
-            DropdownMenuItem(
-                text = { Text("Size (smallest first)") },
-                onClick = { onSortSelected(PdfSortOrder.SIZE_ASC); expanded = false }
-            )
+            options.forEach { (order, label) ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            stringResource(label),
+                            fontWeight = if (order == currentSort) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    onClick = {
+                        onSortSelected(order)
+                        expanded = false
+                    }
+                )
+            }
         }
     }
 }
@@ -533,28 +582,28 @@ private fun SortDropdown(
 @Composable
 private fun PdfHistoryCard(
     item: SavedPdf,
-    isWide: Boolean = false,
-    selectionMode: Boolean = false,
-    isSelected: Boolean = false,
-    thumbnailSeed: Int = 0,
-    onToggleSelected: () -> Unit = {},
+    selectionMode: Boolean,
+    selectionIndex: Int?,
+    thumbnailSeed: Int,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
     onDeleted: (Uri) -> Unit,
-    onRename: (SavedPdf) -> Unit,
-    onPreview: (SavedPdf) -> Unit,
+    onRename: () -> Unit,
     onReordered: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
-    val thumbnail by produceState<android.graphics.Bitmap?>(initialValue = null, item.uri, thumbnailSeed) {
-        value = withContext(Dispatchers.IO) { PdfStorage.renderPdfThumbnail(context, item.uri) }
-    }
-    val pageCount by produceState<Int?>(initialValue = null, item.uri) {
-        value = withContext(Dispatchers.IO) { PdfStorage.countPdfPages(context, item.uri) }
-    }
-    val thumbnailWidth = if (isWide) 100.dp else 80.dp
+    val preview = rememberPdfPreview(item.uri, thumbnailSeed)
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showReorderDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
-    var swipeOffset by remember { mutableStateOf(0f) }
+    var showMenu by remember { mutableStateOf(false) }
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) showDeleteDialog = true
+            // Always snap back, the dialog decides whether the document goes away.
+            false
+        }
+    )
 
     if (showDeleteDialog) {
         AlertDialog(
@@ -596,19 +645,18 @@ private fun PdfHistoryCard(
         )
     }
 
-    Box(modifier = Modifier.fillMaxWidth()) {
-        // Swipe-to-delete background
-        if (swipeOffset < -80 && !selectionMode) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(vertical = 4.dp)
-                    .background(MaterialTheme.colorScheme.error, RoundedCornerShape(16.dp)),
-                contentAlignment = Alignment.CenterEnd
-            ) {
-                Row(
-                    modifier = Modifier.padding(end = 24.dp),
-                    verticalAlignment = Alignment.CenterVertically
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false,
+        gesturesEnabled = !selectionMode,
+        backgroundContent = {
+            if (dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.error, RoundedCornerShape(16.dp))
+                        .padding(end = 24.dp),
+                    contentAlignment = Alignment.CenterEnd
                 ) {
                     Icon(
                         Icons.Default.Delete,
@@ -616,151 +664,153 @@ private fun PdfHistoryCard(
                         tint = MaterialTheme.colorScheme.onError,
                         modifier = Modifier.size(28.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        stringResource(R.string.delete),
-                        color = MaterialTheme.colorScheme.onError,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold
-                    )
                 }
             }
         }
+    ) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .graphicsLayer { translationX = swipeOffset }
-                .pointerInput(selectionMode) {
-                    if (!selectionMode) {
-                        detectHorizontalDragGestures(
-                            onDragEnd = {
-                                if (swipeOffset < -200) {
-                                    showDeleteDialog = true
-                                }
-                                swipeOffset = 0f
-                            },
-                            onHorizontalDrag = { change, dragAmount ->
-                                change.consume()
-                                swipeOffset = (swipeOffset + dragAmount).coerceIn(-300f, 0f)
-                            }
-                        )
-                    }
+                .clip(RoundedCornerShape(16.dp))
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+            colors = CardDefaults.cardColors(
+                containerColor = if (selectionIndex != null) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerHigh
                 }
-                .combinedClickable(
-                    onClick = {
-                        if (selectionMode) onToggleSelected() else onPreview(item)
-                    },
-                    onLongClick = {
-                        if (!selectionMode) {
-                            onToggleSelected()
-                        }
-                    }
-                ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            ),
             shape = RoundedCornerShape(16.dp)
         ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.Top
-        ) {
-            Box(
+            Row(
                 modifier = Modifier
-                    .width(thumbnailWidth)
-                    .aspectRatio(0.707f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                val thumb = thumbnail
-                if (thumb != null) {
-                    Image(
-                        bitmap = thumb.asImageBitmap(),
-                        contentDescription = stringResource(R.string.pdf_preview),
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Icon(
-                        Icons.Default.Description,
-                        contentDescription = null,
-                        modifier = Modifier.size(32.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                    )
+                Box(
+                    modifier = Modifier
+                        .width(64.dp)
+                        .aspectRatio(PAGE_ASPECT_RATIO)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val thumbnail = preview?.thumbnail
+                    if (thumbnail != null) {
+                        Image(
+                            bitmap = thumbnail.asImageBitmap(),
+                            contentDescription = stringResource(R.string.pdf_preview),
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.Description,
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                        )
+                    }
+                    if (selectionIndex != null) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(4.dp)
+                                .size(20.dp)
+                                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "$selectionIndex",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                    }
                 }
-            }
 
-            Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(12.dp))
 
-            Column(modifier = Modifier.weight(1f)) {
-                if (selectionMode) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = stringResource(if (isSelected) R.string.selected_for_merge else R.string.tap_select_merge),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        text = item.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (item.isExternal) stringResource(R.string.external_pdf_label) else pdfMeta(item, preview),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
-                Text(
-                    text = item.name,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = stringResource(
-                        R.string.file_meta,
-                        formatSize(item.sizeBytes),
-                        pageCount?.toString() ?: "-"
-                    ),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    FilledTonalIconButton(
-                        onClick = { PdfStorage.sharePdf(context, item.uri, item.name) },
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(Icons.Default.Share, contentDescription = stringResource(R.string.share), modifier = Modifier.size(18.dp))
+
+                if (selectionMode) {
+                    Checkbox(checked = selectionIndex != null, onCheckedChange = { onClick() })
+                } else {
+                    IconButton(onClick = { PdfStorage.sharePdf(context, item.uri, item.name) }) {
+                        Icon(Icons.Default.Share, contentDescription = stringResource(R.string.share))
                     }
-                    FilledTonalIconButton(
-                        onClick = { showReorderDialog = true },
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = stringResource(R.string.pages), modifier = Modifier.size(18.dp))
-                    }
-                    FilledTonalIconButton(
-                        onClick = { onRename(item) },
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.rename), modifier = Modifier.size(18.dp))
-                    }
-                    FilledTonalIconButton(
-                        onClick = { showExportDialog = true },
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(Icons.Default.FileDownload, contentDescription = stringResource(R.string.export_as), modifier = Modifier.size(18.dp))
-                    }
-                    FilledTonalIconButton(
-                        onClick = { showDeleteDialog = true },
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = stringResource(R.string.delete),
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.error
-                        )
+                    Box {
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_actions))
+                        }
+                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            PdfMenuItem(Icons.AutoMirrored.Filled.OpenInNew, stringResource(R.string.open)) {
+                                showMenu = false
+                                PdfStorage.openPdf(context, item.uri)
+                            }
+                            PdfMenuItem(Icons.Default.FileCopy, stringResource(R.string.pages)) {
+                                showMenu = false
+                                showReorderDialog = true
+                            }
+                            PdfMenuItem(Icons.Default.Edit, stringResource(R.string.rename)) {
+                                showMenu = false
+                                onRename()
+                            }
+                            PdfMenuItem(Icons.Default.FileDownload, stringResource(R.string.export_as)) {
+                                showMenu = false
+                                showExportDialog = true
+                            }
+                            HorizontalDivider()
+                            PdfMenuItem(Icons.Default.Delete, stringResource(R.string.delete)) {
+                                showMenu = false
+                                showDeleteDialog = true
+                            }
+                        }
                     }
                 }
             }
         }
     }
 }
+
+@Composable
+private fun PdfMenuItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = { Text(label) },
+        leadingIcon = { Icon(icon, contentDescription = null) },
+        onClick = onClick
+    )
+}
+
+@Composable
+private fun pdfMeta(item: SavedPdf, preview: PdfPreview?): String {
+    val date = remember(item.dateAdded) {
+        DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(item.dateAdded * 1000))
+    }
+    val pageCount = preview?.pageCount
+    val pages = if (pageCount != null) pluralStringResource(R.plurals.pages_count, pageCount, pageCount) else null
+    return listOfNotNull(formatSize(item.sizeBytes), pages, date).joinToString(" · ")
 }
 
 @Composable
@@ -771,8 +821,20 @@ private fun ScannerExportDialog(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var isExporting by remember { mutableStateOf(false) }
-    val baseName = remember(item.name) {
-        item.name.removeSuffix(".pdf").take(60).ifBlank { "export" }
+    val baseName = remember(item.name) { item.name.removeSuffix(".pdf") }
+
+    fun export(successMessage: Int, block: () -> Boolean) {
+        scope.launch {
+            isExporting = true
+            val ok = withContext(Dispatchers.IO) { block() }
+            isExporting = false
+            Toast.makeText(
+                context,
+                if (ok) successMessage else R.string.export_failed,
+                Toast.LENGTH_LONG
+            ).show()
+            onDismiss()
+        }
     }
 
     AlertDialog(
@@ -784,66 +846,24 @@ private fun ScannerExportDialog(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator()
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(stringResource(R.string.saving))
+                        Text(stringResource(R.string.exporting))
                     }
                 }
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     ScannerExportOption(label = stringResource(R.string.export_png)) {
-                        scope.launch {
-                            isExporting = true
-                            val count = withContext(Dispatchers.IO) {
-                                PdfStorage.exportPdfAsPngs(context, item.uri, baseName)
-                            }
-                            isExporting = false
-                            Toast.makeText(
-                                context,
-                                if (count > 0) {
-                                    context.getString(R.string.export_png_success)
-                                } else {
-                                    context.getString(R.string.export_failed)
-                                },
-                                Toast.LENGTH_LONG
-                            ).show()
-                            onDismiss()
+                        export(R.string.export_png_success) {
+                            PdfStorage.exportPdfAsPngs(context, item.uri, baseName) > 0
                         }
                     }
                     ScannerExportOption(label = stringResource(R.string.export_html)) {
-                        scope.launch {
-                            isExporting = true
-                            val ok = withContext(Dispatchers.IO) {
-                                PdfStorage.exportPdfAsHtml(context, item.uri, baseName)
-                            }
-                            isExporting = false
-                            Toast.makeText(
-                                context,
-                                if (ok) {
-                                    context.getString(R.string.export_html_success)
-                                } else {
-                                    context.getString(R.string.export_failed)
-                                },
-                                Toast.LENGTH_LONG
-                            ).show()
-                            onDismiss()
+                        export(R.string.export_html_success) {
+                            PdfStorage.exportPdfAsHtml(context, item.uri, baseName)
                         }
                     }
                     ScannerExportOption(label = stringResource(R.string.export_docx)) {
-                        scope.launch {
-                            isExporting = true
-                            val ok = withContext(Dispatchers.IO) {
-                                PdfStorage.exportPdfAsDocx(context, item.uri, baseName)
-                            }
-                            isExporting = false
-                            Toast.makeText(
-                                context,
-                                if (ok) {
-                                    context.getString(R.string.export_docx_success)
-                                } else {
-                                    context.getString(R.string.export_failed)
-                                },
-                                Toast.LENGTH_LONG
-                            ).show()
-                            onDismiss()
+                        export(R.string.export_docx_success) {
+                            PdfStorage.exportPdfAsDocx(context, item.uri, baseName)
                         }
                     }
                 }
@@ -860,11 +880,39 @@ private fun ScannerExportDialog(
 
 @Composable
 private fun ScannerExportOption(label: String, onClick: () -> Unit) {
-    androidx.compose.material3.OutlinedButton(
+    OutlinedButton(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth()
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+private fun PageRowPreview(uri: Uri, page: Int) {
+    val context = LocalContext.current.applicationContext
+    val preview by produceState<Bitmap?>(initialValue = null, uri, page) {
+        value = withContext(previewDispatcher) {
+            PdfStorage.renderPdfPage(context, uri, page, PAGE_ROW_PREVIEW_WIDTH_PX)
+        }
+    }
+    Box(
+        modifier = Modifier
+            .width(44.dp)
+            .aspectRatio(PAGE_ASPECT_RATIO)
+            .clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center
+    ) {
+        val bitmap = preview
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit
+            )
+        }
     }
 }
 
@@ -877,11 +925,14 @@ private fun ReorderPagesDialog(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var originalOrder by remember(item.uri) { mutableStateOf<List<Int>?>(null) }
     var pageOrder by remember(item.uri) { mutableStateOf<List<Int>?>(null) }
     var isSaving by remember { mutableStateOf(false) }
 
     LaunchedEffect(item.uri) {
-        pageOrder = withContext(Dispatchers.IO) { PdfStorage.getPdfPageOrder(context, item.uri) }
+        val order = withContext(Dispatchers.IO) { PdfStorage.getPdfPageOrder(context, item.uri) }
+        originalOrder = order
+        pageOrder = order
     }
 
     AlertDialog(
@@ -895,52 +946,46 @@ private fun ReorderPagesDialog(
                         Text(stringResource(R.string.single_page_pdf))
                     } else {
                         LazyColumn(
-                            modifier = Modifier.fillMaxWidth().height(280.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(320.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            itemsIndexed(order) { index, page ->
+                            itemsIndexed(order, key = { _, page -> page }) { index, page ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    PageRowPreview(item.uri, page)
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = stringResource(R.string.page_number, page + 1),
                                         modifier = Modifier.weight(1f),
                                         style = MaterialTheme.typography.bodyMedium
                                     )
-                                    TextButton(
+                                    IconButton(
                                         enabled = index > 0 && !isSaving,
-                                        onClick = {
-                                            pageOrder = order.toMutableList().apply {
-                                                val temp = this[index - 1]
-                                                this[index - 1] = this[index]
-                                                this[index] = temp
-                                            }
-                                        }
+                                        onClick = { pageOrder = order.swapped(index, index - 1) },
+                                        modifier = Modifier.size(36.dp)
                                     ) {
-                                        Text(stringResource(R.string.up))
-                                    }
-                                    TextButton(
-                                        enabled = index < order.lastIndex && !isSaving,
-                                        onClick = {
-                                            pageOrder = order.toMutableList().apply {
-                                                val temp = this[index + 1]
-                                                this[index + 1] = this[index]
-                                                this[index] = temp
-                                            }
-                                        }
-                                    ) {
-                                        Text(stringResource(R.string.down))
+                                        Icon(Icons.Default.ArrowUpward, contentDescription = stringResource(R.string.up), modifier = Modifier.size(18.dp))
                                     }
                                     IconButton(
-                                        enabled = order.size > 1 && !isSaving,
-                                        onClick = {
-                                            pageOrder = order.toMutableList().apply { removeAt(index) }
-                                        }
+                                        enabled = index < order.lastIndex && !isSaving,
+                                        onClick = { pageOrder = order.swapped(index, index + 1) },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(Icons.Default.ArrowDownward, contentDescription = stringResource(R.string.down), modifier = Modifier.size(18.dp))
+                                    }
+                                    IconButton(
+                                        enabled = !isSaving,
+                                        onClick = { pageOrder = order - page },
+                                        modifier = Modifier.size(36.dp)
                                     ) {
                                         Icon(
                                             Icons.Default.Delete,
                                             contentDescription = stringResource(R.string.delete_page),
+                                            modifier = Modifier.size(18.dp),
                                             tint = MaterialTheme.colorScheme.error
                                         )
                                     }
@@ -954,7 +999,7 @@ private fun ReorderPagesDialog(
         confirmButton = {
             val order = pageOrder
             TextButton(
-                enabled = order != null && !isSaving,
+                enabled = order != null && order != originalOrder && !isSaving,
                 onClick = {
                     if (order == null) return@TextButton
                     scope.launch {
@@ -993,7 +1038,7 @@ private fun RenamePdfDialog(
                 value = value,
                 onValueChange = { value = it },
                 singleLine = true,
-                label = { Text(stringResource(R.string.file_name_pattern)) }
+                label = { Text(stringResource(R.string.file_name)) }
             )
         },
         confirmButton = {
@@ -1010,108 +1055,157 @@ private fun RenamePdfDialog(
 }
 
 @Composable
-private fun PdfPreviewDialog(
+private fun PdfViewerDialog(
     item: SavedPdf,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
-    var page by remember(item.uri) { mutableStateOf(0) }
     val pageCount by produceState<Int?>(initialValue = null, item.uri) {
-        value = withContext(Dispatchers.IO) { PdfStorage.countPdfPages(context, item.uri) }
-    }
-    val bitmap by produceState<android.graphics.Bitmap?>(initialValue = null, item.uri, page) {
-        value = withContext(Dispatchers.IO) { PdfStorage.renderPdfPage(context, item.uri, page) }
+        value = withContext(previewDispatcher) { PdfStorage.countPdfPages(context, item.uri) ?: 0 }
     }
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(stringResource(R.string.preview))
-                TextButton(onClick = { PdfStorage.openPdf(context, item.uri) }) {
-                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Open", style = MaterialTheme.typography.labelMedium)
-                }
-            }
-        },
-        text = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(380.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp))
-                        .pointerInput(Unit) {
-                            var totalDrag = 0f
-                            detectHorizontalDragGestures(
-                                onDragEnd = {
-                                    if (totalDrag < -120) {
-                                        val count = pageCount
-                                        if (count != null && page < count - 1) page++
-                                    } else if (totalDrag > 120) {
-                                        if (page > 0) page--
-                                    }
-                                    totalDrag = 0f
-                                },
-                                onHorizontalDrag = { change, dragAmount ->
-                                    change.consume()
-                                    totalDrag += dragAmount
-                                }
-                            )
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (bitmap != null) {
-                        Image(
-                            bitmap = bitmap!!.asImageBitmap(),
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Fit
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.surfaceContainerLowest
+        ) {
+            Column {
+                TopAppBar(
+                    title = {
+                        Text(
+                            item.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
-                    } else {
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.close))
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { PdfStorage.sharePdf(context, item.uri, item.name) }) {
+                            Icon(Icons.Default.Share, contentDescription = stringResource(R.string.share))
+                        }
+                        IconButton(onClick = { PdfStorage.openPdf(context, item.uri) }) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = stringResource(R.string.open))
+                        }
+                    }
+                )
+                val count = pageCount
+                when {
+                    count == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator()
                     }
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                // Page indicator dots
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    val count = pageCount ?: 0
-                    repeat(count) { index ->
-                        Box(
+                    count == 0 -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(stringResource(R.string.could_not_load_pdf))
+                    }
+                    else -> {
+                        val pagerState = rememberPagerState { count }
+                        var isZoomed by remember { mutableStateOf(false) }
+                        HorizontalPager(
+                            state = pagerState,
                             modifier = Modifier
-                                .size(if (index == page) 8.dp else 6.dp)
-                                .background(
-                                    if (index == page) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                                    RoundedCornerShape(4.dp)
-                                )
+                                .fillMaxWidth()
+                                .weight(1f),
+                            userScrollEnabled = !isZoomed,
+                            pageSpacing = 8.dp,
+                            key = { it }
+                        ) { page ->
+                            ZoomablePdfPage(
+                                uri = item.uri,
+                                page = page,
+                                onZoomChanged = { isZoomed = it }
+                            )
+                        }
+                        Text(
+                            text = stringResource(R.string.page_x_of_y, pagerState.currentPage + 1, count),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    "${page + 1} / ${pageCount ?: 0}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.close))
             }
         }
-    )
+    }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun ZoomablePdfPage(
+    uri: Uri,
+    page: Int,
+    onZoomChanged: (Boolean) -> Unit,
+) {
+    val context = LocalContext.current.applicationContext
+    val bitmap by produceState<Bitmap?>(initialValue = null, uri, page) {
+        value = withContext(previewDispatcher) {
+            PdfStorage.renderPdfPage(context, uri, page, VIEWER_PAGE_WIDTH_PX)
+        }
+    }
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    var size by remember { mutableStateOf(IntSize.Zero) }
+
+    fun clampOffset(value: Offset): Offset {
+        val maxX = size.width * (scale - 1f) / 2f
+        val maxY = size.height * (scale - 1f) / 2f
+        return Offset(value.x.coerceIn(-maxX, maxX), value.y.coerceIn(-maxY, maxY))
+    }
+
+    val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+        scale = (scale * zoomChange).coerceIn(1f, VIEWER_MAX_ZOOM)
+        offset = clampOffset(offset + panChange)
+    }
+    val isZoomed = scale > 1f
+    LaunchedEffect(isZoomed) { onZoomChanged(isZoomed) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onSizeChanged { size = it }
+            .pointerInput(Unit) {
+                detectTapGestures(onDoubleTap = {
+                    scale = if (scale > 1f) 1f else VIEWER_DOUBLE_TAP_ZOOM
+                    offset = Offset.Zero
+                })
+            }
+            .transformable(transformState, canPan = { scale > 1f }),
+        contentAlignment = Alignment.Center
+    ) {
+        val pageBitmap = bitmap
+        if (pageBitmap != null) {
+            Image(
+                bitmap = pageBitmap.asImageBitmap(),
+                contentDescription = stringResource(R.string.page_number, page + 1),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = offset.x
+                        translationY = offset.y
+                    },
+                contentScale = ContentScale.Fit
+            )
+        } else {
+            CircularProgressIndicator()
+        }
+    }
 }
 
 @Composable
 private fun MergePreviewDialog(
     orderedItems: List<SavedPdf>,
+    thumbnailSeed: Int,
     onDismiss: () -> Unit,
     onConfirm: (List<SavedPdf>) -> Unit,
 ) {
@@ -1119,11 +1213,11 @@ private fun MergePreviewDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Merge Order") },
+        title = { Text(stringResource(R.string.merge_order_title)) },
         text = {
             Column {
                 Text(
-                    "Reorder PDFs before merging",
+                    stringResource(R.string.merge_order_subtitle),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1134,73 +1228,102 @@ private fun MergePreviewDialog(
                         .height(320.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    itemsIndexed(items) { index, pdf ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "${index + 1}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = pdf.name,
-                                modifier = Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            IconButton(
-                                onClick = {
-                                    if (index > 0) {
-                                        items = items.toMutableList().apply {
-                                            val tmp = this[index - 1]; this[index - 1] = this[index]; this[index] = tmp
-                                        }
-                                    }
-                                },
-                                enabled = index > 0,
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(Icons.Default.ArrowUpward, contentDescription = "Up", modifier = Modifier.size(16.dp))
-                            }
-                            IconButton(
-                                onClick = {
-                                    if (index < items.lastIndex) {
-                                        items = items.toMutableList().apply {
-                                            val tmp = this[index + 1]; this[index + 1] = this[index]; this[index] = tmp
-                                        }
-                                    }
-                                },
-                                enabled = index < items.lastIndex,
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(Icons.Default.ArrowDownward, contentDescription = "Down", modifier = Modifier.size(16.dp))
-                            }
-                        }
+                    itemsIndexed(items, key = { _, pdf -> pdf.uri.toString() }) { index, pdf ->
+                        MergePreviewRow(
+                            pdf = pdf,
+                            position = index + 1,
+                            thumbnailSeed = thumbnailSeed,
+                            canMoveUp = index > 0,
+                            canMoveDown = index < items.lastIndex,
+                            onMoveUp = { items = items.swapped(index, index - 1) },
+                            onMoveDown = { items = items.swapped(index, index + 1) }
+                        )
                     }
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = { onConfirm(items) }) {
-                Text("Merge")
+                Text(stringResource(R.string.merge))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.cancel))
             }
         }
     )
+}
+
+@Composable
+private fun MergePreviewRow(
+    pdf: SavedPdf,
+    position: Int,
+    thumbnailSeed: Int,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+) {
+    val preview = rememberPdfPreview(pdf.uri, thumbnailSeed)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "$position",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimary
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Box(
+            modifier = Modifier
+                .width(44.dp)
+                .aspectRatio(PAGE_ASPECT_RATIO)
+                .clip(RoundedCornerShape(6.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            val thumbnail = preview?.thumbnail
+            if (thumbnail != null) {
+                Image(
+                    bitmap = thumbnail.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = pdf.name,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        IconButton(onClick = onMoveUp, enabled = canMoveUp, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Default.ArrowUpward, contentDescription = stringResource(R.string.up), modifier = Modifier.size(18.dp))
+        }
+        IconButton(onClick = onMoveDown, enabled = canMoveDown, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Default.ArrowDownward, contentDescription = stringResource(R.string.down), modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+private fun <T> List<T>.swapped(first: Int, second: Int): List<T> {
+    return toMutableList().apply {
+        val moved = this[first]
+        this[first] = this[second]
+        this[second] = moved
+    }
 }
 
 private fun formatSize(bytes: Long): String {
@@ -1210,8 +1333,8 @@ private fun formatSize(bytes: Long): String {
     val gb = mb * 1024.0
     return when {
         bytes >= gb -> String.format("%.2f GB", bytes / gb)
-        bytes >= mb -> String.format("%.2f MB", bytes / mb)
-        bytes >= kb -> String.format("%.1f KB", bytes / kb)
+        bytes >= mb -> String.format("%.1f MB", bytes / mb)
+        bytes >= kb -> String.format("%.0f KB", bytes / kb)
         else -> "$bytes B"
     }
 }

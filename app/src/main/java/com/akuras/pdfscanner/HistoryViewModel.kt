@@ -16,13 +16,22 @@ import kotlinx.coroutines.withContext
 data class HistoryUiState(
     val items: List<SavedPdf> = emptyList(),
     val allItems: List<SavedPdf> = emptyList(),
-    val mergeMode: Boolean = false,
+    val externalItems: List<SavedPdf> = emptyList(),
+    val selectionMode: Boolean = false,
     val isMerging: Boolean = false,
-    val selectedMergeUris: Set<String> = emptySet(),
+    val isSavingScan: Boolean = false,
+    // Insertion order is the merge order
+    val selectedUris: Set<String> = emptySet(),
     val thumbnailSeed: Int = 0,
     val sortOrder: PdfSortOrder = PdfSortOrder.DATE_DESC,
     val searchQuery: String = "",
-)
+) {
+    val selectedItems: List<SavedPdf>
+        get() {
+            val byUri = (allItems + externalItems).associateBy { it.uri.toString() }
+            return selectedUris.mapNotNull(byUri::get)
+        }
+}
 
 class HistoryViewModel(application: Application) : AndroidViewModel(application) {
     private val appContext = application.applicationContext
@@ -32,31 +41,36 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
     var uiState by mutableStateOf(HistoryUiState())
         private set
 
-    init {
-        refresh()
-    }
-
     fun refresh() {
         viewModelScope.launch {
             val allItems = withContext(Dispatchers.IO) {
                 PdfStorage.querySavedPdfs(appContext, uiState.sortOrder)
             }
-            val visibleItems = applySearch(allItems, uiState.searchQuery)
+            val known = (allItems + uiState.externalItems).mapTo(mutableSetOf()) { it.uri.toString() }
             uiState = uiState.copy(
                 allItems = allItems,
-                items = visibleItems,
-                selectedMergeUris = uiState.selectedMergeUris.filterTo(mutableSetOf()) { selected ->
-                    allItems.any { it.uri.toString() == selected }
-                }
-            )
+                selectedUris = uiState.selectedUris.filterTo(linkedSetOf()) { it in known }
+            ).withVisibleItems()
+        }
+    }
+
+    /** Falls back to the scanner's own PDF if the enhanced PDF cannot be built. */
+    fun saveScan(pageUris: List<Uri>, fallbackPdfUri: Uri?) {
+        viewModelScope.launch {
+            uiState = uiState.copy(isSavingScan = true)
+            val saved = withContext(Dispatchers.IO) {
+                val pattern = loadFileNamePattern(appContext)
+                PdfStorage.saveScanToDownloads(appContext, pageUris, loadScanMode(appContext), pattern)
+                    ?: fallbackPdfUri?.let { PdfStorage.savePdfToDownloads(appContext, it, pattern) }
+            }
+            uiState = uiState.copy(isSavingScan = false)
+            _messages.emit(if (saved != null) R.string.saved_to_downloads else R.string.unable_to_save_pdf)
+            refresh()
         }
     }
 
     fun setSearchQuery(query: String) {
-        uiState = uiState.copy(
-            searchQuery = query,
-            items = applySearch(uiState.allItems, query)
-        )
+        uiState = uiState.copy(searchQuery = query).withVisibleItems()
     }
 
     fun setSortOrder(order: PdfSortOrder) {
@@ -65,73 +79,70 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
         refresh()
     }
 
-    fun toggleMergeMode() {
-        val next = !uiState.mergeMode
+    fun enterSelectionMode(initial: Uri? = null) {
         uiState = uiState.copy(
-            mergeMode = next,
-            selectedMergeUris = if (next) uiState.selectedMergeUris else emptySet()
-        )
+            selectionMode = true,
+            selectedUris = initial?.let { linkedSetOf(it.toString()) } ?: emptySet()
+        ).withVisibleItems()
+    }
+
+    fun exitSelectionMode() {
+        uiState = uiState.copy(
+            selectionMode = false,
+            selectedUris = emptySet(),
+            externalItems = emptyList()
+        ).withVisibleItems()
     }
 
     fun toggleSelection(uri: Uri) {
         val key = uri.toString()
-        val selected = uiState.selectedMergeUris
+        val selected = uiState.selectedUris
         uiState = uiState.copy(
-            selectedMergeUris = if (selected.contains(key)) selected - key else selected + key
+            selectedUris = if (selected.contains(key)) selected - key else selected + key
         )
     }
 
-    fun mergeSelected(pattern: String) {
-        if (uiState.selectedMergeUris.size < 2 || uiState.isMerging) return
+    fun selectAll() {
+        uiState = uiState.copy(selectedUris = uiState.selectedUris + uiState.items.map { it.uri.toString() })
+    }
+
+    fun addExternal(items: List<SavedPdf>) {
+        uiState = uiState.copy(
+            externalItems = (uiState.externalItems + items).distinctBy { it.uri.toString() },
+            selectedUris = uiState.selectedUris + items.map { it.uri.toString() }
+        ).withVisibleItems()
+    }
+
+    fun merge(sources: List<SavedPdf>) {
+        if (sources.size < 2 || uiState.isMerging) return
         viewModelScope.launch {
             uiState = uiState.copy(isMerging = true)
-            val mergeUris = uiState.allItems
-                .filter { uiState.selectedMergeUris.contains(it.uri.toString()) }
-                .map { it.uri }
             val merged = withContext(Dispatchers.IO) {
-                PdfStorage.mergePdfsToDownloads(appContext, mergeUris, pattern)
+                PdfStorage.mergePdfsToDownloads(appContext, sources.map { it.uri }, loadFileNamePattern(appContext))
             }
             uiState = uiState.copy(isMerging = false)
             if (merged != null) {
                 _messages.emit(R.string.toast_merge_success)
+                exitSelectionMode()
                 refresh()
-                uiState = uiState.copy(
-                    mergeMode = false,
-                    selectedMergeUris = emptySet(),
-                    thumbnailSeed = uiState.thumbnailSeed + 1
-                )
             } else {
                 _messages.emit(R.string.toast_merge_failed)
             }
         }
     }
 
-    fun shareSelected() {
-        val selected = uiState.allItems.filter { uiState.selectedMergeUris.contains(it.uri.toString()) }
-        if (selected.isEmpty()) return
-        PdfStorage.sharePdfs(appContext, selected)
-    }
-
+    /** Removes the selected saved PDFs. External PDFs only leave the selection, their files stay. */
     fun deleteSelected() {
-        val uris = uiState.selectedMergeUris.map(Uri::parse)
+        val uris = uiState.selectedItems.filterNot { it.isExternal }.map { it.uri }
         if (uris.isEmpty()) return
         viewModelScope.launch {
-            var successCount = 0
-            withContext(Dispatchers.IO) {
-                uris.forEach { uri ->
-                    if (PdfStorage.deletePdf(appContext, uri)) successCount++
-                }
+            val deletedCount = withContext(Dispatchers.IO) {
+                uris.count { uri -> PdfStorage.deletePdf(appContext, uri) }
             }
-            if (successCount > 0) {
-                _messages.emit(R.string.toast_deleted)
-                uiState = uiState.copy(
-                    selectedMergeUris = emptySet(),
-                    mergeMode = false,
-                    thumbnailSeed = uiState.thumbnailSeed + 1
-                )
+            _messages.emit(if (deletedCount == uris.size) R.string.toast_deleted else R.string.toast_delete_failed)
+            if (deletedCount > 0) {
+                exitSelectionMode()
                 refresh()
-            } else {
-                _messages.emit(R.string.toast_delete_failed)
             }
         }
     }
@@ -158,10 +169,8 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
             if (deleted) {
                 uiState = uiState.copy(
                     allItems = uiState.allItems.filterNot { it.uri == uri },
-                    items = uiState.items.filterNot { it.uri == uri },
-                    selectedMergeUris = uiState.selectedMergeUris - uri.toString(),
-                    thumbnailSeed = uiState.thumbnailSeed + 1
-                )
+                    selectedUris = uiState.selectedUris - uri.toString()
+                ).withVisibleItems()
                 _messages.emit(R.string.toast_deleted)
             } else {
                 _messages.emit(R.string.toast_delete_failed)
@@ -173,15 +182,16 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             if (success) {
                 _messages.emit(R.string.toast_pages_updated)
-                refresh()
                 uiState = uiState.copy(thumbnailSeed = uiState.thumbnailSeed + 1)
+                refresh()
             } else {
                 _messages.emit(R.string.toast_pages_update_failed)
             }
         }
     }
 
-    private fun applySearch(items: List<SavedPdf>, query: String): List<SavedPdf> {
-        return filterPdfsByQuery(items, query)
+    private fun HistoryUiState.withVisibleItems(): HistoryUiState {
+        val candidates = if (selectionMode) allItems + externalItems else allItems
+        return copy(items = filterPdfsByQuery(candidates, searchQuery))
     }
 }

@@ -1,6 +1,5 @@
 package com.akuras.pdfscanner
 
-import android.net.Uri
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -8,20 +7,15 @@ class HistoryFiltersTest {
 
     @Test
     fun returnsAllWhenQueryBlank() {
-        val items = listOf(
-            SavedPdf("Invoice.pdf", Uri.parse("content://a")),
-            SavedPdf("Contract.pdf", Uri.parse("content://b")),
-        )
+        val items = listOf("Invoice.pdf", "Contract.pdf")
 
-        assertEquals(items, filterPdfsByQuery(items, " "))
+        assertEquals(items, filterByName(items, " ") { it })
     }
 
     @Test
     fun filtersCaseInsensitiveByName() {
-        val invoice = SavedPdf("Invoice_March.pdf", Uri.parse("content://a"))
-        val contract = SavedPdf("Contract.pdf", Uri.parse("content://b"))
-        val items = listOf(invoice, contract)
+        val items = listOf("Invoice_March.pdf", "Contract.pdf")
 
-        assertEquals(listOf(invoice), filterPdfsByQuery(items, "inVOICE"))
+        assertEquals(listOf("Invoice_March.pdf"), filterByName(items, "inVOICE") { it })
     }
 }

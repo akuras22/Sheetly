@@ -1,5 +1,6 @@
 package com.akuras.pdfscanner
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -18,5 +19,17 @@ class FileNamePatternTest {
         val value = resolveFileName("doc_{unknown}_{yy}")
         assertTrue(value.contains("{unknown}"))
         assertFalse(value.contains("{yy}"))
+    }
+
+    @Test
+    fun replacesCharactersNotAllowedInFileNames() {
+        assertEquals("a_b_c", sanitizeFileName("a/b:c"))
+    }
+
+    @Test
+    fun usesFallbackWhenNothingUsableRemains() {
+        assertEquals("scan", sanitizeFileName("   "))
+        assertEquals("scan", sanitizeFileName("..."))
+        assertEquals("", sanitizeFileName(" ", fallback = ""))
     }
 }

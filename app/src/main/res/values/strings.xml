@@ -1,10 +1,13 @@
 <resources>
     <string name="app_name">PDF Scanner</string>
     <string name="settings">Settings</string>
-    <string name="scan_document">Scan Document</string>
+    <string name="back">Back</string>
+    <string name="scan_document">Scan document</string>
     <string name="saved_to_downloads">Saved to Downloads/PDFScanner</string>
     <string name="unable_to_save_pdf">Unable to save PDF</string>
     <string name="scanner_unavailable">Scanner unavailable</string>
+    <string name="processing_scan">Processing scan…</string>
+
     <string name="allow_install_unknown_apps">Allow this app to install unknown apps to update</string>
     <string name="allow_install_to_continue">Allow this app to install unknown apps to continue</string>
     <string name="update_source_not_trusted">Update source is not trusted</string>
@@ -24,40 +27,78 @@
     <string name="new_version_available">A newer version (%1$s) is available. Download and install the latest APK?</string>
     <string name="download">Download</string>
     <string name="later">Later</string>
+
     <string name="saved_pdfs">Saved PDFs</string>
-    <string name="documents_count">%1$d document(s)</string>
-    <string name="cancel_merge">Cancel Merge</string>
-    <string name="merge_pdfs">Merge PDFs</string>
-    <string name="selected_count">%1$d selected</string>
-    <string name="merging">Merging…</string>
-    <string name="merge_selected">Merge Selected</string>
+    <plurals name="documents_count">
+        <item quantity="one">%1$d document</item>
+        <item quantity="other">%1$d documents</item>
+    </plurals>
+    <plurals name="pages_count">
+        <item quantity="one">%1$d page</item>
+        <item quantity="other">%1$d pages</item>
+    </plurals>
     <string name="no_scanned_documents">No scanned documents yet</string>
-    <string name="tap_scan_to_start">Tap Scan Document below to get started</string>
+    <string name="tap_scan_to_start">Tap Scan document below to get started</string>
+    <string name="no_search_results">No matching documents</string>
+    <string name="no_search_results_hint">Nothing found for \"%1$s\"</string>
+    <string name="search_documents">Search documents</string>
+    <string name="sort_by">Sort by</string>
+    <string name="sort_date_desc">Date (newest first)</string>
+    <string name="sort_date_asc">Date (oldest first)</string>
+    <string name="sort_name_asc">Name (A-Z)</string>
+    <string name="sort_name_desc">Name (Z-A)</string>
+    <string name="sort_size_desc">Size (largest first)</string>
+    <string name="sort_size_asc">Size (smallest first)</string>
+
+    <string name="select">Select</string>
+    <string name="select_all">Select all</string>
+    <string name="selected_count">%1$d selected</string>
+    <string name="merge">Merge</string>
+    <string name="merging">Merging…</string>
+    <string name="add_external_pdfs">Add PDFs</string>
+    <string name="external_pdf_label">External PDF</string>
+    <string name="external_pdf_fallback_name">External PDF %1$d</string>
+    <string name="merge_order_title">Merge order</string>
+    <string name="merge_order_subtitle">Reorder the PDFs before merging</string>
+
     <string name="delete_document_title">Delete document?</string>
-    <string name="delete_document_text">&quot;%1$s&quot; will be permanently deleted.</string>
+    <string name="delete_document_text">\"%1$s\" will be permanently deleted.</string>
+    <plurals name="delete_selected_title">
+        <item quantity="one">Delete %1$d document?</item>
+        <item quantity="other">Delete %1$d documents?</item>
+    </plurals>
+    <string name="delete_selected_text">Selected documents will be permanently deleted. External PDFs stay untouched.</string>
     <string name="delete">Delete</string>
     <string name="cancel">Cancel</string>
+    <string name="close">Close</string>
+    <string name="more_actions">More actions</string>
     <string name="pdf_preview">PDF preview</string>
-    <string name="selected_for_merge">Selected for merge</string>
-    <string name="tap_select_merge">Tap to select for merge</string>
     <string name="open">Open</string>
     <string name="share">Share</string>
-    <string name="pages">Pages</string>
-    <string name="move_pages">Move pages</string>
+    <string name="rename">Rename</string>
+    <string name="file_name">File name</string>
+    <string name="pages">Manage pages</string>
+    <string name="move_pages">Manage pages</string>
     <string name="loading_pages">Loading pages…</string>
     <string name="single_page_pdf">This PDF has only one page.</string>
+    <string name="could_not_load_pdf">This PDF could not be loaded.</string>
     <string name="page_number">Page %1$d</string>
+    <string name="page_x_of_y">Page %1$d of %2$d</string>
     <string name="up">Up</string>
     <string name="down">Down</string>
+    <string name="delete_page">Delete page</string>
     <string name="saving">Saving…</string>
     <string name="save">Save</string>
     <string name="share_pdf_chooser">Share PDF</string>
     <string name="open_pdf_chooser">Open PDF</string>
     <string name="no_pdf_app">No app can open PDFs</string>
+
     <string name="toast_merge_success">PDFs merged</string>
     <string name="toast_merge_failed">Merge failed</string>
     <string name="toast_deleted">Deleted</string>
     <string name="toast_delete_failed">Delete failed</string>
+    <string name="toast_renamed">Renamed</string>
+    <string name="toast_rename_failed">Rename failed</string>
     <string name="toast_pages_updated">Pages updated</string>
     <string name="toast_pages_update_failed">Could not update pages</string>
 
@@ -70,42 +111,38 @@
     <string name="export_html_success">HTML saved to Downloads/PDFScanner</string>
     <string name="export_docx_success">DOCX saved to Downloads/PDFScanner</string>
     <string name="export_failed">Export failed</string>
-    <string name="delete_page">Delete page</string>
-    <string name="merge_order_title">Merge Order</string>
-    <string name="merge_order_subtitle">Reorder PDFs before merging</string>
-    <string name="add_external_pdfs">Add External PDFs</string>
-    <string name="external_pdf_label">External PDF</string>
-    <string name="merge_position">%1$d</string>
 
-    <string name="file_name_template">File Name Template</string>
-    <string name="file_name_template_description">Set the default name for scanned PDFs. Tap tokens below to insert them at the cursor.</string>
-    <string name="file_name_pattern">File name pattern</string>
-    <string name="preview_file_name">Preview: %1$s.pdf</string>
-    <string name="date_tokens">Date Tokens</string>
-    <string name="time_tokens">Time Tokens</string>
-    <string name="reset_to_default">Reset to Default</string>
-    <string name="search_documents">Search documents</string>
-    <string name="sort_by">Sort by</string>
-    <string name="sort_date">Date</string>
-    <string name="sort_name">Name</string>
-    <string name="sort_size">Size</string>
-    <string name="share_selected">Share selected</string>
-    <string name="delete_selected">Delete selected</string>
-    <string name="rename">Rename</string>
-    <string name="preview">Preview</string>
-    <string name="close">Close</string>
-    <string name="toast_renamed">Renamed</string>
-    <string name="toast_rename_failed">Rename failed</string>
-    <string name="file_meta">%1$s, %2$s pages</string>
-    <string name="page_x_of_y">Page %1$d of %2$d</string>
-    <string name="backup_export">Backup export</string>
-    <string name="toast_backup_success">Backup exported</string>
-    <string name="toast_backup_failed">Backup export failed</string>
+    <string name="scan_mode">Scan enhancement</string>
+    <string name="scan_mode_original">Original</string>
+    <string name="scan_mode_document">Document</string>
+    <string name="scan_mode_black_white">Black and white</string>
+    <string name="scan_mode_original_description">Keeps the pages exactly as the scanner delivers them.</string>
+    <string name="scan_mode_document_description">Removes shadows, whitens the paper and strengthens text. Colours are kept.</string>
+    <string name="scan_mode_black_white_description">Pure black text on white paper. Best for plain text documents.</string>
+
     <string name="theme_mode">Theme</string>
     <string name="theme_system">System</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
+
+    <string name="file_name_template">File name template</string>
+    <string name="file_name_template_description">Set the default name for scanned PDFs. Tap tokens below to insert them at the cursor.</string>
+    <string name="file_name_pattern">File name pattern</string>
+    <string name="preview_file_name">Preview: %1$s.pdf</string>
+    <string name="date_tokens">Date tokens</string>
+    <string name="time_tokens">Time tokens</string>
+    <string name="reset_to_default">Reset to default</string>
+    <string name="token_year_long">Year (2026)</string>
+    <string name="token_year_short">Year (26)</string>
+    <string name="token_month_number">Month (03)</string>
+    <string name="token_month_short">Month (Mar)</string>
+    <string name="token_month_long">Month (March)</string>
+    <string name="token_day">Day (09)</string>
+    <string name="token_hour">Hour (14)</string>
+    <string name="token_minute">Minute (05)</string>
+    <string name="token_second">Second (30)</string>
+
     <string name="onboarding_title">Welcome to PDF Scanner</string>
-    <string name="onboarding_text">Scan documents, merge PDFs, reorder pages, and manage your PDF history in one place.</string>
+    <string name="onboarding_text">Scan documents and manage your PDFs in one place. Touch and hold a document to select several and merge, share, or delete them.</string>
     <string name="got_it">Got it</string>
 </resources>

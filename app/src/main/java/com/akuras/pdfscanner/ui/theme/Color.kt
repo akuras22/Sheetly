@@ -16,4 +16,4 @@ val DarkOnSurface = Color(0xFFE6E1E5)
 val DarkOnSurfaceVariant = Color(0xFFC4C0C8)
 
 // Accent
-val ErrorRed = Color(0xFFEF5350)
+val ErrorRed = Color(0xFFC62828)
