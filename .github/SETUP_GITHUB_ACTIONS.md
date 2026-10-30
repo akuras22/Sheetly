@@ -25,13 +25,13 @@ GitHub Actions nutzt automatisch `secrets.GITHUB_TOKEN` – **kein Setup nötig*
 # Neue Keystore-Datei erzeugen (interaktiv)
 keytool -genkey -v -keystore ~/release.keystore \
   -keyalg RSA -keysize 2048 -validity 10000 \
-  -alias pdfscanner
+  -alias sheetly
 ```
 
 Wichtige Informationen notieren:
 - **Keystore-Datei**: `~/release.keystore`
 - **Keystore-Passwort**: (aus `keytool` Step)
-- **Key Alias**: `pdfscanner`
+- **Key Alias**: `sheetly`
 - **Key Passwort**: (aus `keytool` Step)
 
 ### Schritt 2: Keystore in Base64 konvertieren
@@ -52,7 +52,7 @@ Erstelle folgende Secrets:
 |---|---|
 | `ANDROID_KEYSTORE_BASE64` | (Base64 aus Schritt 2) |
 | `ANDROID_KEYSTORE_PASSWORD` | (Keystore Passwort) |
-| `ANDROID_KEY_ALIAS` | `pdfscanner` |
+| `ANDROID_KEY_ALIAS` | `sheetly` |
 | `ANDROID_KEY_PASSWORD` | (Key Passwort) |
 
 ---
