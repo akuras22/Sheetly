@@ -95,7 +95,7 @@ Gehe zu: **Actions → Build And Release APK → Run workflow → Main → Run w
 ## Troubleshooting
 
 ### ❌ Build fehlgeschlagen?
-Prüfe die **Actions Logs**: https://github.com/akuras22/PDFScanner/actions
+Prüfe die **Actions Logs**: https://github.com/akuras22/Sheetly/actions
 
 ### ❌ Signing-Fehler?
 - Secrets korrekt gesetzt? (Settings → Secrets)

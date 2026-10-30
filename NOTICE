@@ -1,0 +1,15 @@
+Sheetly
+Copyright 2026 Akuras22
+https://github.com/akuras22/Sheetly
+
+This product was created by Akuras22. Under section 4 of the Apache License 2.0,
+this notice must be kept in every copy and every derivative work, and modified
+files must state that they were changed. Copies and derivative works must not be
+presented as original work of someone else.
+
+Third-party software used by this app:
+- AndroidX and Jetpack Compose, Apache License 2.0
+- PdfBox-Android (Tom Roush), Apache License 2.0
+- Android Material Components, Apache License 2.0
+- Kotlin and kotlinx.coroutines, Apache License 2.0
+- Google ML Kit (document scanner, text recognition), ML Kit Terms of Service

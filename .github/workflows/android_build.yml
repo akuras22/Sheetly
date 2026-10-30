@@ -2,6 +2,8 @@ name: Build And Release APK
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -27,6 +29,9 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
 
+      - name: Run unit tests
+        run: ./gradlew :app:testDebugUnitTest
+
       - name: Build Release APK
         # This builds the 'unsigned' version first
         run: ./gradlew :app:assembleRelease
@@ -46,13 +51,27 @@ jobs:
           keyPassword: ${{ secrets.KEY_PASSWORD }}
 
 
+      - name: Name APK
+        id: apk
+        env:
+          BUILT_APK: ${{ steps.sign_app.outputs.signedReleaseFile || 'app/build/outputs/apk/release/app-release-unsigned.apk' }}
+        run: |
+          NAME="Sheetly-${GITHUB_REF_NAME//\//-}.apk"
+          cp "$BUILT_APK" "$NAME"
+          echo "file=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.file }}
+          path: ${{ steps.apk.outputs.file }}
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          # This uses the signed APK if signing worked, otherwise the unsigned one
-          files: ${{ steps.sign_app.outputs.signedReleaseFile || 'app/build/outputs/apk/release/app-release-unsigned.apk' }}
-          name: Release ${{ github.ref_name }}
+          files: ${{ steps.apk.outputs.file }}
+          name: Sheetly ${{ github.ref_name }}
           draft: false
           prerelease: false
         env:
