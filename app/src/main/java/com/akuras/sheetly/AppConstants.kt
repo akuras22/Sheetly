@@ -1,3 +1,3 @@
-package com.akuras.pdfscanner
+package com.akuras.sheetly
 
-const val UPDATE_APK_NAME = "PDFScanner-update.apk"
+const val UPDATE_APK_NAME = "Sheetly-update.apk"

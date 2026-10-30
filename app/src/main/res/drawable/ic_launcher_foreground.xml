@@ -11,19 +11,19 @@
 
     <!-- Folded corner -->
     <path
-        android:fillColor="#B7DDE6"
+        android:fillColor="#CFE2F7"
         android:pathData="M59,36.5L67,44.5H61.5A2.5,2.5 0 0 1 59,42Z" />
 
     <!-- Text lines -->
     <path
-        android:strokeColor="#9CC5D0"
+        android:strokeColor="#A9C8EA"
         android:strokeWidth="2.8"
         android:strokeLineCap="round"
         android:pathData="M46,47.5H54M46,63.5H62" />
 
     <!-- Scan beam -->
     <path
-        android:strokeColor="#5EEBB5"
+        android:strokeColor="#BFE3FF"
         android:strokeWidth="4"
         android:strokeLineCap="round"
         android:pathData="M35.5,55.5H72.5" />

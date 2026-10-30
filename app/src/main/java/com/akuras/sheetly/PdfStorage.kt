@@ -1,4 +1,4 @@
-package com.akuras.pdfscanner
+package com.akuras.sheetly
 
 import android.content.ContentUris
 import android.content.ContentValues
@@ -45,8 +45,8 @@ private const val SCAN_JPEG_QUALITY = 0.9f
 private const val SCAN_PAGE_LONG_SIDE_PT = 842f
 private const val MAX_FILE_NAME_LENGTH = 60
 private const val PDF_MIME_TYPE = "application/pdf"
-private const val DOWNLOADS_SUBFOLDER = "PDFScanner"
-private const val TAG = "PdfStorage"
+private const val DOWNLOADS_SUBFOLDER = "Sheetly"
+internal const val STORAGE_TAG = "PdfStorage"
 
 enum class PdfSortOrder {
     DATE_DESC,
@@ -73,13 +73,13 @@ data class PdfPreview(
 )
 
 object PdfStorage {
-    private val downloadsPath = "${Environment.DIRECTORY_DOWNLOADS}/$DOWNLOADS_SUBFOLDER"
+    internal val downloadsPath = "${Environment.DIRECTORY_DOWNLOADS}/$DOWNLOADS_SUBFOLDER"
 
-    private val downloadsCollection: Uri
+    internal val downloadsCollection: Uri
         get() = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
 
     /** Creates a pending Downloads entry, publishes it on success and removes it on any failure. */
-    private inline fun writeToDownloads(
+    internal inline fun writeToDownloads(
         context: Context,
         fileName: String,
         mimeType: String,
@@ -105,11 +105,11 @@ object PdfStorage {
             }, null, null)
             uri
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to write $fileName", e)
+            Log.e(STORAGE_TAG, "Failed to write $fileName", e)
             resolver.delete(uri, null, null)
             null
         } catch (e: OutOfMemoryError) {
-            Log.e(TAG, "Out of memory while writing $fileName", e)
+            Log.e(STORAGE_TAG, "Out of memory while writing $fileName", e)
             resolver.delete(uri, null, null)
             null
         }
@@ -173,6 +173,7 @@ object PdfStorage {
         val fileName = "${sanitizeFileName(resolveFileName(pattern))}.pdf"
         return writeToDownloads(context, fileName, PDF_MIME_TYPE) { output ->
             PDDocument(MemoryUsageSetting.setupTempFileOnly()).use { document ->
+                val textLayer = if (loadScanOcr(context)) TextLayerWriter() else null
                 pageUris.forEach { pageUri ->
                     val image = if (mode == ScanMode.ORIGINAL) {
                         val input = context.contentResolver.openInputStream(pageUri)
@@ -181,8 +182,44 @@ object PdfStorage {
                     } else {
                         enhancedPageImage(context, document, pageUri, mode)
                     }
-                    addImagePage(document, image)
+                    val page = addImagePage(document, image)
+                    if (textLayer != null) {
+                        val bitmap = decodeScanPage(context, pageUri)
+                        textLayer.add(document, page, bitmap)
+                        bitmap.recycle()
+                    }
                 }
+                textLayer?.close()
+                document.save(output)
+            }
+        }
+    }
+
+    /** Builds a PDF from finished page bitmaps, which are loaded one at a time and then recycled. */
+    fun saveBitmapPagesToDownloads(
+        context: Context,
+        pageCount: Int,
+        pattern: String,
+        loadPage: (Int) -> Bitmap,
+    ): Uri? {
+        if (pageCount <= 0) return null
+        PDFBoxResourceLoader.init(context.applicationContext)
+        val fileName = "${sanitizeFileName(resolveFileName(pattern))}.pdf"
+        return writeToDownloads(context, fileName, PDF_MIME_TYPE) { output ->
+            PDDocument(MemoryUsageSetting.setupTempFileOnly()).use { document ->
+                val textLayer = if (loadScanOcr(context)) TextLayerWriter() else null
+                for (pageIndex in 0 until pageCount) {
+                    val bitmap = loadPage(pageIndex)
+                    try {
+                        bitmap.setHasAlpha(false)
+                        val image = JPEGFactory.createFromImage(document, bitmap, SCAN_JPEG_QUALITY)
+                        val page = addImagePage(document, image)
+                        textLayer?.add(document, page, bitmap)
+                    } finally {
+                        bitmap.recycle()
+                    }
+                }
+                textLayer?.close()
                 document.save(output)
             }
         }
@@ -223,7 +260,7 @@ object PdfStorage {
         return bitmap
     }
 
-    private fun addImagePage(document: PDDocument, image: PDImageXObject) {
+    private fun addImagePage(document: PDDocument, image: PDImageXObject): PDPage {
         val scale = SCAN_PAGE_LONG_SIDE_PT / maxOf(image.width, image.height)
         val pageWidth = image.width * scale
         val pageHeight = image.height * scale
@@ -232,6 +269,7 @@ object PdfStorage {
         PDPageContentStream(document, page).use { content ->
             content.drawImage(image, 0f, 0f, pageWidth, pageHeight)
         }
+        return page
     }
 
     fun querySavedPdfs(context: Context, sortOrder: PdfSortOrder = PdfSortOrder.DATE_DESC): List<SavedPdf> {
@@ -275,7 +313,7 @@ object PdfStorage {
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to query saved PDFs", e)
+            Log.e(STORAGE_TAG, "Failed to query saved PDFs", e)
         }
         return items
     }
@@ -293,7 +331,7 @@ object PdfStorage {
                 null
             ) > 0
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to rename PDF $uri", e)
+            Log.e(STORAGE_TAG, "Failed to rename PDF $uri", e)
             false
         }
     }
@@ -325,7 +363,12 @@ object PdfStorage {
      * Rewrites the PDF with only the pages in [pageOrder], in that order. The original is kept
      * in the cache until the new content is written, so a failed write can restore it.
      */
-    fun reorderPdfPages(context: Context, targetUri: Uri, pageOrder: List<Int>): Boolean {
+    fun reorderPdfPages(
+        context: Context,
+        targetUri: Uri,
+        pageOrder: List<Int>,
+        rotations: Map<Int, Int> = emptyMap(),
+    ): Boolean {
         if (pageOrder.isEmpty() || pageOrder.distinct().size != pageOrder.size) return false
         PDFBoxResourceLoader.init(context.applicationContext)
         val resolver = context.contentResolver
@@ -338,7 +381,10 @@ object PdfStorage {
             PDDocument.load(original, MemoryUsageSetting.setupTempFileOnly()).use { source ->
                 if (pageOrder.any { it !in 0 until source.numberOfPages }) return false
                 PDDocument().use { result ->
-                    pageOrder.forEach { pageIndex -> result.importPage(source.getPage(pageIndex)) }
+                    pageOrder.forEach { pageIndex ->
+                        val page = result.importPage(source.getPage(pageIndex))
+                        page.rotation = (page.rotation + (rotations[pageIndex] ?: 0)) % 360
+                    }
                     result.save(edited)
                 }
             }
@@ -346,13 +392,13 @@ object PdfStorage {
             try {
                 overwrite(context, targetUri, edited)
             } catch (e: IOException) {
-                Log.e(TAG, "Failed to replace PDF, restoring original", e)
+                Log.e(STORAGE_TAG, "Failed to replace PDF, restoring original", e)
                 overwrite(context, targetUri, original)
                 return false
             }
             true
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to reorder PDF pages", e)
+            Log.e(STORAGE_TAG, "Failed to reorder PDF pages", e)
             false
         } finally {
             original.delete()
@@ -370,7 +416,7 @@ object PdfStorage {
         return try {
             withRenderer(context, uri) { renderer -> List(renderer.pageCount) { it } } ?: emptyList()
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to read PDF page order", e)
+            Log.e(STORAGE_TAG, "Failed to read PDF page order", e)
             emptyList()
         }
     }
@@ -379,7 +425,7 @@ object PdfStorage {
         return try {
             withRenderer(context, uri) { it.pageCount }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to count PDF pages", e)
+            Log.e(STORAGE_TAG, "Failed to count PDF pages", e)
             null
         }
     }
@@ -391,7 +437,7 @@ object PdfStorage {
                 renderer.openPage(pageIndex).use { page -> page.renderToWidth(width) }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to render PDF page", e)
+            Log.e(STORAGE_TAG, "Failed to render PDF page", e)
             null
         }
     }
@@ -408,7 +454,7 @@ object PdfStorage {
                 PdfPreview(thumbnail, renderer.pageCount)
             } ?: PdfPreview(null, null)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to load PDF preview", e)
+            Log.e(STORAGE_TAG, "Failed to load PDF preview", e)
             PdfPreview(null, null)
         }
     }
@@ -443,7 +489,7 @@ object PdfStorage {
         try {
             context.startActivity(Intent.createChooser(intent, context.getString(R.string.open_pdf_chooser)))
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to open PDF", e)
+            Log.e(STORAGE_TAG, "Failed to open PDF", e)
             Toast.makeText(context, R.string.no_pdf_app, Toast.LENGTH_SHORT).show()
         }
     }
@@ -452,14 +498,14 @@ object PdfStorage {
         return try {
             context.contentResolver.delete(uri, null, null) > 0
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to delete PDF", e)
+            Log.e(STORAGE_TAG, "Failed to delete PDF", e)
             false
         }
     }
 
     /**
      * Exports every page of the PDF as a separate PNG file into a sub-folder
-     * Downloads/PDFScanner/<baseName>/.
+     * Downloads/Sheetly/<baseName>/.
      * Returns the number of pages exported.
      */
     fun exportPdfAsPngs(context: Context, uri: Uri, baseName: String): Int {
@@ -485,16 +531,16 @@ object PdfStorage {
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to export PDF as PNG", e)
+            Log.e(STORAGE_TAG, "Failed to export PDF as PNG", e)
         } catch (e: OutOfMemoryError) {
-            Log.e(TAG, "Out of memory while exporting PDF as PNG", e)
+            Log.e(STORAGE_TAG, "Out of memory while exporting PDF as PNG", e)
         }
         return count
     }
 
     /**
      * Exports the PDF as an HTML file with each page embedded as a base64 JPEG image.
-     * Saved to Downloads/PDFScanner/<baseName>.html.
+     * Saved to Downloads/Sheetly/<baseName>.html.
      */
     fun exportPdfAsHtml(context: Context, uri: Uri, baseName: String): Boolean {
         val safeName = exportFileName(baseName)
@@ -524,7 +570,7 @@ object PdfStorage {
     /**
      * Exports the PDF as a DOCX file where every page is an embedded JPEG image. Pages are
      * rendered one at a time so long documents do not have to fit in memory.
-     * Saved to Downloads/PDFScanner/<baseName>.docx.
+     * Saved to Downloads/Sheetly/<baseName>.docx.
      */
     fun exportPdfAsDocx(context: Context, uri: Uri, baseName: String): Boolean {
         val safeName = exportFileName(baseName)

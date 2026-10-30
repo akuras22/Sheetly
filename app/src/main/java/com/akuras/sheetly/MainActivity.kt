@@ -1,4 +1,4 @@
-package com.akuras.pdfscanner
+package com.akuras.sheetly
 
 import android.app.DownloadManager
 import android.content.ActivityNotFoundException
@@ -20,7 +20,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,7 +32,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
-import com.akuras.pdfscanner.ui.theme.PDFScannerTheme
+import com.akuras.sheetly.scan.ScannerActivity
+import com.akuras.sheetly.ui.OneUiAlertDialog
+import com.akuras.sheetly.ui.theme.SheetlyTheme
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
@@ -43,7 +44,7 @@ import java.security.MessageDigest
 class MainActivity : ComponentActivity() {
 
     private val githubOwner = "akuras22"
-    private val githubRepo = "PDFScanner"
+    private val githubRepo = "Sheetly"
 
     private val historyViewModel: HistoryViewModel by viewModels()
     private var updateDownloadId: Long? = null
@@ -72,12 +73,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (savedInstanceState == null) importSharedPdf(intent)
         val isDark = resolveDarkTheme(this, loadThemeMode(this))
         WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = !isDark
         WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightNavigationBars = !isDark
 
         setContent {
-            PDFScannerTheme(darkTheme = resolveDarkTheme(this@MainActivity, loadThemeMode(this@MainActivity))) {
+            SheetlyTheme(darkTheme = resolveDarkTheme(this@MainActivity, loadThemeMode(this@MainActivity))) {
                 var availableUpdate by remember { mutableStateOf<AvailableUpdate?>(null) }
                 var updateCheckDone by rememberSaveable { mutableStateOf(false) }
                 var showOnboarding by rememberSaveable { mutableStateOf(shouldShowOnboarding(this@MainActivity)) }
@@ -105,7 +107,7 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 if (showOnboarding) {
-                    AlertDialog(
+                    OneUiAlertDialog(
                         onDismissRequest = {
                             markOnboardingSeen(this@MainActivity)
                             showOnboarding = false
@@ -132,6 +134,22 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        importSharedPdf(intent)
+    }
+
+    /** Takes over PDFs that another app opened with or shared to this app. */
+    private fun importSharedPdf(intent: Intent?) {
+        val uri = when (intent?.action) {
+            Intent.ACTION_VIEW -> intent.data
+            Intent.ACTION_SEND -> intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            else -> null
+        } ?: return
+        historyViewModel.importPdf(uri)
+        setIntent(Intent(this, MainActivity::class.java))
+    }
+
     override fun onDestroy() {
         updateDownloadReceiver?.let {
             try {
@@ -144,6 +162,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startScan() {
+        if (loadScannerEngine(this) == ScannerEngine.BUILT_IN) {
+            startActivity(Intent(this, ScannerActivity::class.java))
+            return
+        }
         val options = GmsDocumentScannerOptions.Builder()
             .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
             .setGalleryImportAllowed(true)
@@ -323,7 +345,7 @@ private fun UpdateAvailableDialog(
     onDismiss: () -> Unit,
     onDownload: () -> Unit,
 ) {
-    AlertDialog(
+    OneUiAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.update_available)) },
         text = {

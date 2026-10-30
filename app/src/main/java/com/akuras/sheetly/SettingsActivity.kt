@@ -1,4 +1,4 @@
-package com.akuras.pdfscanner
+package com.akuras.sheetly
 
 import android.content.Context
 import android.os.Bundle
@@ -16,39 +16,45 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
-import com.akuras.pdfscanner.ui.theme.PDFScannerTheme
+import com.akuras.sheetly.ui.CollapsingTopBar
+import com.akuras.sheetly.ui.LargeHeader
+import com.akuras.sheetly.ui.OneUiChoicePill
+import com.akuras.sheetly.ui.OneUiSwitch
+import com.akuras.sheetly.ui.SettingsGroup
+import com.akuras.sheetly.ui.largeHeaderHeight
+import com.akuras.sheetly.ui.theme.SheetlyTheme
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -65,12 +71,16 @@ class SettingsActivity : ComponentActivity() {
                 insetsController.isAppearanceLightStatusBars = !isDark
                 insetsController.isAppearanceLightNavigationBars = !isDark
             }
-            PDFScannerTheme(darkTheme = isDark) {
+            SheetlyTheme(darkTheme = isDark) {
                 SettingsScreen(
                     initialPattern = loadFileNamePattern(this),
                     onPatternChanged = { saveFileNamePattern(this, it) },
                     initialScanMode = loadScanMode(this),
                     onScanModeChanged = { saveScanMode(this, it) },
+                    initialEngine = loadScannerEngine(this),
+                    onEngineChanged = { saveScannerEngine(this, it) },
+                    initialOcr = loadScanOcr(this),
+                    onOcrChanged = { saveScanOcr(this, it) },
                     themeMode = themeMode,
                     onThemeModeChanged = { mode ->
                         saveThemeMode(this, mode)
@@ -101,7 +111,12 @@ private val timeTokens = listOf(
     Token(R.string.token_second, "{ss}"),
 )
 
-private fun ScanMode.labelRes(): Int = when (this) {
+private fun ScannerEngine.labelRes(): Int = when (this) {
+    ScannerEngine.BUILT_IN -> R.string.scanner_engine_built_in
+    ScannerEngine.GOOGLE -> R.string.scanner_engine_google
+}
+
+fun ScanMode.labelRes(): Int = when (this) {
     ScanMode.ORIGINAL -> R.string.scan_mode_original
     ScanMode.DOCUMENT -> R.string.scan_mode_document
     ScanMode.BLACK_WHITE -> R.string.scan_mode_black_white
@@ -123,25 +138,6 @@ private fun TextFieldValue.withInserted(token: String): TextFieldValue {
     val start = minOf(selection.start, selection.end)
     val end = maxOf(selection.start, selection.end)
     return TextFieldValue(text.replaceRange(start, end, token), TextRange(start + token.length))
-}
-
-@Composable
-private fun <T> ChoiceRow(
-    options: List<T>,
-    selected: T,
-    label: @Composable (T) -> String,
-    onSelected: (T) -> Unit,
-) {
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-        options.forEachIndexed { index, option ->
-            SegmentedButton(
-                selected = option == selected,
-                onClick = { onSelected(option) },
-                shape = SegmentedButtonDefaults.itemShape(index, options.size),
-                label = { Text(label(option), maxLines = 1) }
-            )
-        }
-    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -166,6 +162,10 @@ private fun SettingsScreen(
     onPatternChanged: (String) -> Unit,
     initialScanMode: ScanMode,
     onScanModeChanged: (ScanMode) -> Unit,
+    initialEngine: ScannerEngine,
+    onEngineChanged: (ScannerEngine) -> Unit,
+    initialOcr: Boolean,
+    onOcrChanged: (Boolean) -> Unit,
     themeMode: ThemeMode,
     onThemeModeChanged: (ThemeMode) -> Unit,
     onBack: () -> Unit,
@@ -174,39 +174,48 @@ private fun SettingsScreen(
         mutableStateOf(TextFieldValue(initialPattern, TextRange(initialPattern.length)))
     }
     var scanMode by rememberSaveable { mutableStateOf(initialScanMode) }
+    var engine by rememberSaveable { mutableStateOf(initialEngine) }
+    var ocrEnabled by rememberSaveable { mutableStateOf(initialOcr) }
     val insertToken: (String) -> Unit = { token ->
         textFieldValue = textFieldValue.withInserted(token)
         onPatternChanged(textFieldValue.text)
     }
 
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text(stringResource(R.string.settings), fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
-                    }
-                }
-            )
-        }
-    ) { padding ->
-        Box(
+    val scrollState = rememberScrollState()
+    val headerPx = with(LocalDensity.current) { largeHeaderHeight().toPx() }
+    val collapsed by remember { derivedStateOf { scrollState.value > headerPx * 0.55f } }
+
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+      Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        Column(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            contentAlignment = Alignment.TopCenter
+                .widthIn(max = 640.dp)
+                .fillMaxWidth()
+                .verticalScroll(scrollState)
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .widthIn(max = 600.dp)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-            ) {
-                Text(stringResource(R.string.scan_mode), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Spacer(modifier = Modifier.height(8.dp))
-                ChoiceRow(
+            LargeHeader(stringResource(R.string.settings), subtitle = null)
+
+            SettingsGroup {
+                Text(stringResource(R.string.scanner_engine), style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(10.dp))
+                OneUiChoicePill(
+                    options = ScannerEngine.entries,
+                    selected = engine,
+                    label = { stringResource(it.labelRes()) },
+                    onSelected = {
+                        engine = it
+                        onEngineChanged(it)
+                    }
+                )
+            }
+
+            SettingsGroup {
+                Text(stringResource(R.string.scan_mode), style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(10.dp))
+                OneUiChoicePill(
                     options = ScanMode.entries,
                     selected = scanMode,
                     label = { stringResource(it.labelRes()) },
@@ -221,22 +230,43 @@ private fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
 
-                Spacer(modifier = Modifier.height(24.dp))
+            SettingsGroup {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.scan_ocr), style = MaterialTheme.typography.titleSmall)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            stringResource(R.string.scan_ocr_description),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    OneUiSwitch(
+                        checked = ocrEnabled,
+                        onCheckedChange = {
+                            ocrEnabled = it
+                            onOcrChanged(it)
+                        }
+                    )
+                }
+            }
 
-                Text(stringResource(R.string.theme_mode), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Spacer(modifier = Modifier.height(8.dp))
-                ChoiceRow(
+            SettingsGroup {
+                Text(stringResource(R.string.theme_mode), style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(10.dp))
+                OneUiChoicePill(
                     options = ThemeMode.entries,
                     selected = themeMode,
                     label = { stringResource(it.labelRes()) },
                     onSelected = onThemeModeChanged
                 )
+            }
 
-                Spacer(modifier = Modifier.height(24.dp))
-
-                // File name template
-                Text(stringResource(R.string.file_name_template), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            SettingsGroup {
+                Text(stringResource(R.string.file_name_template), style = MaterialTheme.typography.titleSmall)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     stringResource(R.string.file_name_template_description),
@@ -244,7 +274,6 @@ private fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(12.dp))
-
                 OutlinedTextField(
                     value = textFieldValue,
                     onValueChange = {
@@ -255,32 +284,22 @@ private fun SettingsScreen(
                     label = { Text(stringResource(R.string.file_name_pattern)) },
                     singleLine = true
                 )
-
                 Spacer(modifier = Modifier.height(8.dp))
-
                 val preview = sanitizeFileName(resolveFileName(textFieldValue.text))
                 Text(
                     text = stringResource(R.string.preview_file_name, preview),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Date tokens group
+                Spacer(modifier = Modifier.height(16.dp))
                 Text(stringResource(R.string.date_tokens), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(modifier = Modifier.height(8.dp))
                 TokenChips(dateTokens, insertToken)
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Time tokens group
+                Spacer(modifier = Modifier.height(14.dp))
                 Text(stringResource(R.string.time_tokens), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(modifier = Modifier.height(8.dp))
                 TokenChips(timeTokens, insertToken)
-
-                Spacer(modifier = Modifier.height(24.dp))
-
+                Spacer(modifier = Modifier.height(8.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = {
                         textFieldValue = TextFieldValue(DEFAULT_PATTERN, TextRange(DEFAULT_PATTERN.length))
@@ -289,18 +308,34 @@ private fun SettingsScreen(
                         Text(stringResource(R.string.reset_to_default))
                     }
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
             }
         }
+
+        CollapsingTopBar(
+            title = stringResource(R.string.settings),
+            showTitle = collapsed,
+            navigation = {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                }
+            }
+        )
+      }
     }
 }
 
-const val PREFS_NAME = "pdfscanner_prefs"
+const val PREFS_NAME = "sheetly_prefs"
 const val KEY_FILE_PATTERN = "file_name_pattern"
 const val KEY_THEME_MODE = "theme_mode"
 const val KEY_SCAN_MODE = "scan_mode"
+const val KEY_SCANNER_ENGINE = "scanner_engine"
+const val KEY_SCAN_OCR = "scan_ocr"
 const val DEFAULT_PATTERN = "scan_{yyyy}{MM}{dd}_{HH}{mm}{ss}"
+
+enum class ScannerEngine {
+    BUILT_IN,
+    GOOGLE,
+}
 
 enum class ThemeMode {
     SYSTEM,
@@ -330,6 +365,30 @@ fun saveThemeMode(context: Context, mode: ThemeMode) {
     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         .edit()
         .putString(KEY_THEME_MODE, mode.name)
+        .apply()
+}
+
+fun loadScannerEngine(context: Context): ScannerEngine {
+    val raw = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        .getString(KEY_SCANNER_ENGINE, ScannerEngine.BUILT_IN.name)
+    return ScannerEngine.entries.firstOrNull { it.name == raw } ?: ScannerEngine.BUILT_IN
+}
+
+fun saveScannerEngine(context: Context, engine: ScannerEngine) {
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        .edit()
+        .putString(KEY_SCANNER_ENGINE, engine.name)
+        .apply()
+}
+
+fun loadScanOcr(context: Context): Boolean {
+    return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(KEY_SCAN_OCR, true)
+}
+
+fun saveScanOcr(context: Context, enabled: Boolean) {
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        .edit()
+        .putBoolean(KEY_SCAN_OCR, enabled)
         .apply()
 }
 

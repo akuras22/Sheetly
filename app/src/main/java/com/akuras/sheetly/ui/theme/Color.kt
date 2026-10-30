@@ -1,19 +1,24 @@
-package com.akuras.pdfscanner.ui.theme
+package com.akuras.sheetly.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val SkyBlue = Color(0xFF1E88E5)
-val TealBlue = Color(0xFF006C84)
-val Mint = Color(0xFF4FB286)
-val Cream = Color(0xFFF6F3EA)
-val Slate = Color(0xFF1C2833)
+// Accent, close to the blue One UI uses for its controls
+val OneBlue = Color(0xFF0381FE)
+val OneBlueDark = Color(0xFF4DA3FF)
 
-// Dark theme surfaces
-val DarkSurface = Color(0xFF121218)
-val DarkSurfaceContainer = Color(0xFF1E1E26)
-val DarkSurfaceVariant = Color(0xFF2A2A34)
-val DarkOnSurface = Color(0xFFE6E1E5)
-val DarkOnSurfaceVariant = Color(0xFFC4C0C8)
+// Light surfaces: a calm grey canvas with white groups on top of it
+val LightCanvas = Color(0xFFF2F2F5)
+val LightGroup = Color(0xFFFFFFFF)
+val LightGroupHigh = Color(0xFFE9E9EE)
+val LightOnSurface = Color(0xFF1C1C1E)
+val LightOnSurfaceVariant = Color(0xFF6B6B72)
 
-// Accent
-val ErrorRed = Color(0xFFC62828)
+// Dark surfaces: true black, which also saves power on AMOLED panels
+val DarkCanvas = Color(0xFF000000)
+val DarkGroup = Color(0xFF1B1B1D)
+val DarkGroupHigh = Color(0xFF29292C)
+val DarkOnSurface = Color(0xFFF2F2F4)
+val DarkOnSurfaceVariant = Color(0xFFA4A4AB)
+
+val ErrorRedLight = Color(0xFFD92D20)
+val ErrorRedDark = Color(0xFFFF6B60)

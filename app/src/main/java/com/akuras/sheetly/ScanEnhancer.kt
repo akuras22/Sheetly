@@ -1,4 +1,4 @@
-package com.akuras.pdfscanner
+package com.akuras.sheetly
 
 import java.util.stream.IntStream
 import kotlin.math.ceil
@@ -21,12 +21,17 @@ enum class ScanMode {
  * the whole page at once.
  */
 internal object ScanEnhancer {
-    private const val CELL_SIZE = 32
+    private const val MIN_CELL_SIZE = 8
+    private const val CELLS_ON_LONG_SIDE = 64
     private const val CELL_SAMPLE_STEP = 2
     private const val PAPER_PERCENTILE = 0.9f
     private const val GLOBAL_PAPER_PERCENTILE = 0.95f
-    /** Keeps photos on a page from being lifted to paper white. */
-    private const val MIN_BACKGROUND_RATIO = 0.4f
+    /** Paper fills most of a cell with one brightness, even in deep shadow. Photos spread out. */
+    private const val PAPER_BAND = 14
+    private const val MIN_PAPER_SHARE = 0.42f
+    private const val UNKNOWN = -1f
+    /** Last line of defence against dividing by almost nothing in black areas. */
+    private const val MIN_BACKGROUND_RATIO = 0.15f
     private const val BLUR_RADIUS = 2
     private const val WHITE_POINT = 232
     private const val MAX_BLACK_POINT = 70
@@ -48,17 +53,18 @@ internal object ScanEnhancer {
     }
 
     private fun flattenLighting(pixels: IntArray, width: Int, height: Int) {
-        val cellsX = ceil(width / CELL_SIZE.toFloat()).toInt()
-        val cellsY = ceil(height / CELL_SIZE.toFloat()).toInt()
-        val background = estimateBackground(pixels, width, height, cellsX, cellsY)
+        val cellSize = max(MIN_CELL_SIZE, max(width, height) / CELLS_ON_LONG_SIDE)
+        val cellsX = ceil(width / cellSize.toFloat()).toInt()
+        val cellsY = ceil(height / cellSize.toFloat()).toInt()
+        val background = estimateBackground(pixels, width, height, cellSize, cellsX, cellsY)
 
         forEachRow(height) { y ->
-            val cellY = (y.toFloat() / CELL_SIZE - 0.5f).coerceIn(0f, (cellsY - 1).toFloat())
+            val cellY = (y.toFloat() / cellSize - 0.5f).coerceIn(0f, (cellsY - 1).toFloat())
             val row0 = cellY.toInt()
             val row1 = min(row0 + 1, cellsY - 1)
             val fy = cellY - row0
             for (x in 0 until width) {
-                val cellX = (x.toFloat() / CELL_SIZE - 0.5f).coerceIn(0f, (cellsX - 1).toFloat())
+                val cellX = (x.toFloat() / cellSize - 0.5f).coerceIn(0f, (cellsX - 1).toFloat())
                 val col0 = cellX.toInt()
                 val col1 = min(col0 + 1, cellsX - 1)
                 val fx = cellX - col0
@@ -80,6 +86,7 @@ internal object ScanEnhancer {
         pixels: IntArray,
         width: Int,
         height: Int,
+        cellSize: Int,
         cellsX: Int,
         cellsY: Int,
     ): FloatArray {
@@ -89,11 +96,11 @@ internal object ScanEnhancer {
             for (cellX in 0 until cellsX) {
                 histogram.fill(0)
                 var samples = 0
-                val endY = min((cellY + 1) * CELL_SIZE, height)
-                val endX = min((cellX + 1) * CELL_SIZE, width)
-                var y = cellY * CELL_SIZE
+                val endY = min((cellY + 1) * cellSize, height)
+                val endX = min((cellX + 1) * cellSize, width)
+                var y = cellY * cellSize
                 while (y < endY) {
-                    var x = cellX * CELL_SIZE
+                    var x = cellX * cellSize
                     while (x < endX) {
                         histogram[luma(pixels[y * width + x])]++
                         samples++
@@ -101,9 +108,15 @@ internal object ScanEnhancer {
                     }
                     y += CELL_SAMPLE_STEP
                 }
-                cells[cellY * cellsX + cellX] = percentile(histogram, samples, PAPER_PERCENTILE).toFloat()
+                val brightness = percentile(histogram, samples, PAPER_PERCENTILE)
+                cells[cellY * cellsX + cellX] = if (isPaperCell(histogram, samples, brightness)) {
+                    brightness.toFloat()
+                } else {
+                    UNKNOWN
+                }
             }
         }
+        fillUnknownCells(cells, cellsX, cellsY)
 
         // Dense text can hide the paper in a whole cell, so take the brightest neighbour first.
         val dilated = dilate(cells, cellsX, cellsY)
@@ -113,6 +126,46 @@ internal object ScanEnhancer {
             dilated[i] = max(dilated[i], floor)
         }
         return blur(dilated, cellsX, cellsY)
+    }
+
+    private fun isPaperCell(histogram: IntArray, samples: Int, brightness: Int): Boolean {
+        var nearPaper = 0
+        for (value in max(brightness - PAPER_BAND, 0)..min(brightness + PAPER_BAND, 255)) {
+            nearPaper += histogram[value]
+        }
+        return nearPaper >= samples * MIN_PAPER_SHARE
+    }
+
+    /** Takes the paper level under a photo from the paper around it. */
+    private fun fillUnknownCells(cells: FloatArray, cellsX: Int, cellsY: Int) {
+        val known = cells.filter { it != UNKNOWN }
+        if (known.isEmpty()) {
+            cells.fill(255f)
+            return
+        }
+        repeat(cellsX + cellsY) {
+            val snapshot = cells.copyOf()
+            var remaining = false
+            for (y in 0 until cellsY) {
+                for (x in 0 until cellsX) {
+                    val index = y * cellsX + x
+                    if (snapshot[index] != UNKNOWN) continue
+                    var sum = 0f
+                    var count = 0
+                    for (ny in max(y - 1, 0)..min(y + 1, cellsY - 1)) {
+                        for (nx in max(x - 1, 0)..min(x + 1, cellsX - 1)) {
+                            val value = snapshot[ny * cellsX + nx]
+                            if (value != UNKNOWN) {
+                                sum += value
+                                count++
+                            }
+                        }
+                    }
+                    if (count > 0) cells[index] = sum / count else remaining = true
+                }
+            }
+            if (!remaining) return
+        }
     }
 
     private fun dilate(values: FloatArray, cellsX: Int, cellsY: Int): FloatArray {

@@ -19,15 +19,15 @@ val hasReleaseSigning =
         !releaseKeyPassword.isNullOrBlank()
 
 android {
-    namespace = "com.akuras.pdfscanner"
+    namespace = "com.akuras.sheetly"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.akuras.pdfscanner"
+        applicationId = "com.akuras.sheetly"
         minSdk = 34
         targetSdk = 35
-        versionCode = ciVersionCode ?: 5
-        versionName = ciVersionName ?: "1.10.0"
+        versionCode = ciVersionCode ?: 6
+        versionName = ciVersionName ?: "2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -100,7 +100,12 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
 
     implementation(libs.mlkit.document.scanner)
+    implementation(libs.mlkit.text.recognition)
     implementation(libs.pdfbox.android)
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
 
     implementation("com.google.android.material:material:1.12.0")
 

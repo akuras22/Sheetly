@@ -1,4 +1,4 @@
-package com.akuras.pdfscanner
+package com.akuras.sheetly
 
 fun filterPdfsByQuery(items: List<SavedPdf>, query: String): List<SavedPdf> {
     return filterByName(items, query) { it.name }

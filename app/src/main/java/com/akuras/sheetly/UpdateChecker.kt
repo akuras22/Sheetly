@@ -1,4 +1,4 @@
-package com.akuras.pdfscanner
+package com.akuras.sheetly
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -27,7 +27,7 @@ suspend fun fetchAvailableUpdate(
         readTimeout = 10_000
         setRequestProperty("Accept", "application/vnd.github+json")
         setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
-        setRequestProperty("User-Agent", "PDFScanner-Update-Check")
+        setRequestProperty("User-Agent", "Sheetly-Update-Check")
     }
 
     try {

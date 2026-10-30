@@ -1,4 +1,4 @@
-package com.akuras.pdfscanner
+package com.akuras.sheetly
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

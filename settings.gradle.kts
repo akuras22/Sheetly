@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "PDFScanner"
+rootProject.name = "Sheetly"
 include(":app")

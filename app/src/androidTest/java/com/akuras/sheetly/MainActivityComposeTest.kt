@@ -1,4 +1,4 @@
-package com.akuras.pdfscanner
+package com.akuras.sheetly
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -13,7 +13,7 @@ class MainActivityComposeTest {
 
     @Test
     fun scanButtonIsVisible() {
-        composeRule.onNodeWithText(composeRule.activity.getString(R.string.scan_document)).assertIsDisplayed()
+        composeRule.onNodeWithText(composeRule.activity.getString(R.string.scan_short)).assertIsDisplayed()
     }
 
     @Test

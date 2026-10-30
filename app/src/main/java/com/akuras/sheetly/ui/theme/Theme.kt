@@ -1,86 +1,105 @@
-package com.akuras.pdfscanner.ui.theme
+package com.akuras.sheetly.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 
 private val LightColors = lightColorScheme(
-    primary = TealBlue,
-    onPrimary = Cream,
-    primaryContainer = Color(0xFFCDE9F0),
-    onPrimaryContainer = Color(0xFF00323E),
-    secondary = Mint,
-    onSecondary = Slate,
-    secondaryContainer = Color(0xFFD5F2E5),
-    onSecondaryContainer = Color(0xFF0B4F35),
-    tertiary = SkyBlue,
-    onTertiary = Cream,
-    background = Cream,
-    onBackground = Slate,
-    surface = Cream,
-    onSurface = Slate,
-    surfaceVariant = Color(0xFFEDE8DD),
-    onSurfaceVariant = Color(0xFF4A4A4A),
-    outline = Color(0xFFBDBDBD),
-    outlineVariant = Color(0xFFE0DCD3),
-    error = ErrorRed,
+    primary = OneBlue,
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFD6E8FE),
+    onPrimaryContainer = Color(0xFF00316B),
+    secondary = OneBlue,
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFDDE9FB),
+    onSecondaryContainer = Color(0xFF0B3B75),
+    tertiary = Color(0xFF34A853),
+    onTertiary = Color.White,
+    background = LightCanvas,
+    onBackground = LightOnSurface,
+    surface = LightCanvas,
+    onSurface = LightOnSurface,
+    surfaceVariant = LightGroupHigh,
+    onSurfaceVariant = LightOnSurfaceVariant,
+    outline = Color(0xFFC7C7CC),
+    outlineVariant = Color(0xFFE3E3E8),
+    error = ErrorRedLight,
     onError = Color.White,
-    errorContainer = Color(0xFFFCE1DF),
+    errorContainer = Color(0xFFFDE4E1),
     onErrorContainer = Color(0xFF7A1712),
-    inverseSurface = Slate,
-    inverseOnSurface = Cream,
-    inversePrimary = Color(0xFF80D8EA),
-    surfaceContainerLowest = Color(0xFFFFFBF5),
-    surfaceContainerLow = Color(0xFFF9F5ED),
-    surfaceContainer = Color(0xFFF5F0E8),
-    surfaceContainerHigh = Color(0xFFEFEAE2),
-    surfaceContainerHighest = Color(0xFFE9E4DB),
+    inverseSurface = Color(0xFF2C2C2E),
+    inverseOnSurface = Color(0xFFF2F2F5),
+    inversePrimary = OneBlueDark,
+    surfaceContainerLowest = Color.White,
+    surfaceContainerLow = LightGroup,
+    surfaceContainer = LightGroup,
+    surfaceContainerHigh = LightGroup,
+    surfaceContainerHighest = LightGroupHigh,
 )
 
 private val DarkColors = darkColorScheme(
-    primary = SkyBlue,
-    onPrimary = Color(0xFF003548),
-    primaryContainer = Color(0xFF004D68),
-    onPrimaryContainer = Color(0xFFB8E9FF),
-    secondary = Mint,
-    onSecondary = Color(0xFF003825),
-    secondaryContainer = Color(0xFF005234),
-    onSecondaryContainer = Color(0xFF8FF7C6),
-    tertiary = Color(0xFFA9C7FF),
-    onTertiary = Color(0xFF1A3175),
-    background = DarkSurface,
+    primary = OneBlueDark,
+    onPrimary = Color(0xFF00244F),
+    primaryContainer = Color(0xFF12375F),
+    onPrimaryContainer = Color(0xFFD6E8FE),
+    secondary = OneBlueDark,
+    onSecondary = Color(0xFF00244F),
+    secondaryContainer = Color(0xFF1B3556),
+    onSecondaryContainer = Color(0xFFD6E8FE),
+    tertiary = Color(0xFF5FD27E),
+    onTertiary = Color(0xFF00391A),
+    background = DarkCanvas,
     onBackground = DarkOnSurface,
-    surface = DarkSurface,
+    surface = DarkCanvas,
     onSurface = DarkOnSurface,
-    surfaceVariant = DarkSurfaceVariant,
+    surfaceVariant = DarkGroupHigh,
     onSurfaceVariant = DarkOnSurfaceVariant,
-    outline = Color(0xFF6B6B75),
-    outlineVariant = Color(0xFF3B3B44),
-    error = Color(0xFFFF8A80),
-    onError = Color(0xFF690005),
-    errorContainer = Color(0xFF93000A),
-    onErrorContainer = Color(0xFFFFDAD6),
-    inverseSurface = Color(0xFFE6E1E5),
-    inverseOnSurface = Color(0xFF313033),
-    inversePrimary = Color(0xFF006879),
-    surfaceContainerLowest = Color(0xFF0D0D12),
-    surfaceContainerLow = Color(0xFF16161B),
-    surfaceContainer = DarkSurface,
-    surfaceContainerHigh = Color(0xFF1E1E26),
-    surfaceContainerHighest = Color(0xFF27272F),
+    outline = Color(0xFF58585E),
+    outlineVariant = Color(0xFF333336),
+    error = ErrorRedDark,
+    onError = Color(0xFF5C0A05),
+    errorContainer = Color(0xFF7A1712),
+    onErrorContainer = Color(0xFFFDE4E1),
+    inverseSurface = Color(0xFFE9E9EE),
+    inverseOnSurface = Color(0xFF1C1C1E),
+    inversePrimary = OneBlue,
+    surfaceContainerLowest = Color.Black,
+    surfaceContainerLow = DarkGroup,
+    surfaceContainer = DarkGroup,
+    surfaceContainerHigh = DarkGroup,
+    surfaceContainerHighest = DarkGroupHigh,
 )
 
+private val AppShapes = Shapes(
+    extraSmall = RoundedCornerShape(12.dp),
+    small = RoundedCornerShape(16.dp),
+    medium = RoundedCornerShape(20.dp),
+    large = RoundedCornerShape(28.dp),
+    extraLarge = RoundedCornerShape(36.dp),
+)
+
+/** The theme this app resolved to, which can differ from the system's when the user overrides it. */
+val LocalIsDarkTheme = staticCompositionLocalOf { false }
+
 @Composable
-fun PDFScannerTheme(
+fun SheetlyTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {
-    MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
-        typography = AppTypography,
-        content = content
-    )
+    CompositionLocalProvider(LocalIsDarkTheme provides darkTheme) {
+        MaterialTheme(
+            colorScheme = if (darkTheme) DarkColors else LightColors,
+            typography = AppTypography,
+            shapes = AppShapes,
+            content = content
+        )
+    }
 }

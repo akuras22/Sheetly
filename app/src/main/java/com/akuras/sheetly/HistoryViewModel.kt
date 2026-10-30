@@ -1,4 +1,4 @@
-package com.akuras.pdfscanner
+package com.akuras.sheetly
 
 import android.app.Application
 import android.net.Uri
@@ -20,6 +20,7 @@ data class HistoryUiState(
     val selectionMode: Boolean = false,
     val isMerging: Boolean = false,
     val isSavingScan: Boolean = false,
+    val isToolRunning: Boolean = false,
     // Insertion order is the merge order
     val selectedUris: Set<String> = emptySet(),
     val thumbnailSeed: Int = 0,
@@ -66,6 +67,24 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
             uiState = uiState.copy(isSavingScan = false)
             _messages.emit(if (saved != null) R.string.saved_to_downloads else R.string.unable_to_save_pdf)
             refresh()
+        }
+    }
+
+    /** Runs a tool that writes a new PDF and reports the outcome. */
+    fun runTool(successMessage: Int, tool: suspend () -> Boolean) {
+        if (uiState.isToolRunning) return
+        viewModelScope.launch {
+            uiState = uiState.copy(isToolRunning = true)
+            val ok = withContext(Dispatchers.IO) { runCatching { tool() }.getOrDefault(false) }
+            uiState = uiState.copy(isToolRunning = false)
+            _messages.emit(if (ok) successMessage else R.string.tool_failed)
+            if (ok) refresh()
+        }
+    }
+
+    fun importPdf(uri: Uri) {
+        runTool(R.string.tool_import_done) {
+            PdfTools.importPdf(appContext, uri, queryPdfDisplayName(appContext, uri)) != null
         }
     }
 

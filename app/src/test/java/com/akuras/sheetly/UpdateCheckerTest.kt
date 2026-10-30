@@ -1,4 +1,4 @@
-package com.akuras.pdfscanner
+package com.akuras.sheetly
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -24,11 +24,11 @@ class UpdateCheckerTest {
 
     @Test
     fun acceptsOnlyTrustedGithubApkUrls() {
-        assertTrue(isTrustedApkUrl("https://github.com/akuras22/PDFScanner/releases/download/v1.0.0/app-release.apk", "akuras22", "PDFScanner"))
-        assertTrue(isTrustedApkUrl("https://objects.githubusercontent.com/github-production-release-asset-2e65be/abc.apk", "akuras22", "PDFScanner"))
-        assertFalse(isTrustedApkUrl("http://github.com/akuras22/PDFScanner/releases/download/v1.0.0/app-release.apk", "akuras22", "PDFScanner"))
-        assertFalse(isTrustedApkUrl("https://evil.example.com/app-release.apk", "akuras22", "PDFScanner"))
-        assertFalse(isTrustedApkUrl("https://github.com/evil/x/akuras22/PDFScanner/releases/download/v1.0.0/a.apk", "akuras22", "PDFScanner"))
+        assertTrue(isTrustedApkUrl("https://github.com/akuras22/Sheetly/releases/download/v1.0.0/app-release.apk", "akuras22", "Sheetly"))
+        assertTrue(isTrustedApkUrl("https://objects.githubusercontent.com/github-production-release-asset-2e65be/abc.apk", "akuras22", "Sheetly"))
+        assertFalse(isTrustedApkUrl("http://github.com/akuras22/Sheetly/releases/download/v1.0.0/app-release.apk", "akuras22", "Sheetly"))
+        assertFalse(isTrustedApkUrl("https://evil.example.com/app-release.apk", "akuras22", "Sheetly"))
+        assertFalse(isTrustedApkUrl("https://github.com/evil/x/akuras22/Sheetly/releases/download/v1.0.0/a.apk", "akuras22", "Sheetly"))
     }
 
     @Test
@@ -37,15 +37,15 @@ class UpdateCheckerTest {
             """
             {
               "assets": [
-                {"name":"app-release-unsigned.apk","browser_download_url":"https://github.com/akuras22/PDFScanner/releases/download/v1.0.0/app-release-unsigned.apk"},
-                {"name":"app-release-signed.apk","browser_download_url":"https://github.com/akuras22/PDFScanner/releases/download/v1.0.0/app-release-signed.apk"}
+                {"name":"app-release-unsigned.apk","browser_download_url":"https://github.com/akuras22/Sheetly/releases/download/v1.0.0/app-release-unsigned.apk"},
+                {"name":"app-release-signed.apk","browser_download_url":"https://github.com/akuras22/Sheetly/releases/download/v1.0.0/app-release-signed.apk"}
               ]
             }
             """.trimIndent()
         )
-        val url = json.findApkAssetUrl("akuras22", "PDFScanner")
+        val url = json.findApkAssetUrl("akuras22", "Sheetly")
         assertEquals(
-            "https://github.com/akuras22/PDFScanner/releases/download/v1.0.0/app-release-signed.apk",
+            "https://github.com/akuras22/Sheetly/releases/download/v1.0.0/app-release-signed.apk",
             url
         )
     }
@@ -56,12 +56,12 @@ class UpdateCheckerTest {
             """
             {
               "assets": [
-                {"name":"app-release-unsigned-signed.apk","browser_download_url":"https://github.com/akuras22/PDFScanner/releases/download/v1.0.0/app-release-unsigned-signed.apk"}
+                {"name":"app-release-unsigned-signed.apk","browser_download_url":"https://github.com/akuras22/Sheetly/releases/download/v1.0.0/app-release-unsigned-signed.apk"}
               ]
             }
             """.trimIndent()
         )
-        assertNotNull(json.findApkAssetUrl("akuras22", "PDFScanner"))
+        assertNotNull(json.findApkAssetUrl("akuras22", "Sheetly"))
     }
 
     @Test
@@ -70,11 +70,11 @@ class UpdateCheckerTest {
             """
             {
               "assets": [
-                {"name":"app-release-unsigned.apk","browser_download_url":"https://github.com/akuras22/PDFScanner/releases/download/v1.0.0/app-release-unsigned.apk"}
+                {"name":"app-release-unsigned.apk","browser_download_url":"https://github.com/akuras22/Sheetly/releases/download/v1.0.0/app-release-unsigned.apk"}
               ]
             }
             """.trimIndent()
         )
-        assertNull(json.findApkAssetUrl("akuras22", "PDFScanner"))
+        assertNull(json.findApkAssetUrl("akuras22", "Sheetly"))
     }
 }
