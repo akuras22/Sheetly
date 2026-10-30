@@ -11,3 +11,4 @@
 *.keystore
 build/
 *.docx
+.kotlin/
