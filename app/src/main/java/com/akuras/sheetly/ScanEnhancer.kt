@@ -29,10 +29,11 @@ internal object ScanEnhancer {
     /** Paper fills most of a cell with one brightness, even in deep shadow. Photos spread out. */
     private const val PAPER_BAND = 14
     private const val MIN_PAPER_SHARE = 0.42f
+    private const val MAX_PAPER_CHROMA = 48
     private const val UNKNOWN = -1f
     /** Last line of defence against dividing by almost nothing in black areas. */
     private const val MIN_BACKGROUND_RATIO = 0.15f
-    private const val BLUR_RADIUS = 2
+    private const val BLUR_RADIUS = 1
     private const val WHITE_POINT = 232
     private const val MAX_BLACK_POINT = 70
     private const val BLACK_PERCENTILE = 0.01f
@@ -109,7 +110,9 @@ internal object ScanEnhancer {
                     y += CELL_SAMPLE_STEP
                 }
                 val brightness = percentile(histogram, samples, PAPER_PERCENTILE)
-                cells[cellY * cellsX + cellX] = if (isPaperCell(histogram, samples, brightness)) {
+                val isPaper = isPaperCell(histogram, samples, brightness) &&
+                    !isColouredCell(pixels, width, cellX * cellSize, cellY * cellSize, endX, endY, brightness)
+                cells[cellY * cellsX + cellX] = if (isPaper) {
                     brightness.toFloat()
                 } else {
                     UNKNOWN
@@ -118,14 +121,14 @@ internal object ScanEnhancer {
         }
         fillUnknownCells(cells, cellsX, cellsY)
 
-        // Dense text can hide the paper in a whole cell, so take the brightest neighbour first.
-        val dilated = dilate(cells, cellsX, cellsY)
-        val paper = percentileOf(dilated, GLOBAL_PAPER_PERCENTILE)
+        // Cells hidden by dense text or photos were filled in above. Taking the brightest neighbour
+        // here instead would carry bright paper into the soft edge of a shadow and leave a grey ring.
+        val paper = percentileOf(cells, GLOBAL_PAPER_PERCENTILE)
         val floor = max(paper * MIN_BACKGROUND_RATIO, 1f)
-        for (i in dilated.indices) {
-            dilated[i] = max(dilated[i], floor)
+        for (i in cells.indices) {
+            cells[i] = max(cells[i], floor)
         }
-        return blur(dilated, cellsX, cellsY)
+        return blur(cells, cellsX, cellsY)
     }
 
     private fun isPaperCell(histogram: IntArray, samples: Int, brightness: Int): Boolean {
@@ -134,6 +137,41 @@ internal object ScanEnhancer {
             nearPaper += histogram[value]
         }
         return nearPaper >= samples * MIN_PAPER_SHARE
+    }
+
+    /**
+     * Paper is close to grey even under warm light. A large area of one strong colour, like a stamp
+     * or a coloured box, is also uniform, but brightening it as if it were shaded paper would wash
+     * it out.
+     */
+    private fun isColouredCell(
+        pixels: IntArray,
+        width: Int,
+        startX: Int,
+        startY: Int,
+        endX: Int,
+        endY: Int,
+        brightness: Int,
+    ): Boolean {
+        var chromaSum = 0L
+        var count = 0
+        var y = startY
+        while (y < endY) {
+            var x = startX
+            while (x < endX) {
+                val pixel = pixels[y * width + x]
+                if (kotlin.math.abs(luma(pixel) - brightness) <= PAPER_BAND) {
+                    val r = (pixel shr 16) and 0xFF
+                    val g = (pixel shr 8) and 0xFF
+                    val b = pixel and 0xFF
+                    chromaSum += max(r, max(g, b)) - min(r, min(g, b))
+                    count++
+                }
+                x += CELL_SAMPLE_STEP
+            }
+            y += CELL_SAMPLE_STEP
+        }
+        return count > 0 && chromaSum / count > MAX_PAPER_CHROMA
     }
 
     /** Takes the paper level under a photo from the paper around it. */
@@ -166,22 +204,6 @@ internal object ScanEnhancer {
             }
             if (!remaining) return
         }
-    }
-
-    private fun dilate(values: FloatArray, cellsX: Int, cellsY: Int): FloatArray {
-        val result = FloatArray(values.size)
-        for (y in 0 until cellsY) {
-            for (x in 0 until cellsX) {
-                var brightest = 0f
-                for (ny in max(y - 1, 0)..min(y + 1, cellsY - 1)) {
-                    for (nx in max(x - 1, 0)..min(x + 1, cellsX - 1)) {
-                        brightest = max(brightest, values[ny * cellsX + nx])
-                    }
-                }
-                result[y * cellsX + x] = brightest
-            }
-        }
-        return result
     }
 
     private fun blur(values: FloatArray, cellsX: Int, cellsY: Int): FloatArray {

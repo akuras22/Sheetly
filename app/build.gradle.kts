@@ -26,8 +26,8 @@ android {
         applicationId = "com.akuras.sheetly"
         minSdk = 34
         targetSdk = 35
-        versionCode = ciVersionCode ?: 6
-        versionName = ciVersionName ?: "2.0"
+        versionCode = ciVersionCode ?: 7
+        versionName = ciVersionName ?: "2.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

@@ -73,6 +73,37 @@ class ScanEnhancerTest {
         assertTrue(value(pixels, 560, 300) > 225)
     }
 
+    /** A hand's shadow fades out softly. Its edge must turn white as well, not stay as a grey ring. */
+    @Test
+    fun removesSoftShadowEdgeWithoutHalo() {
+        val pixels = IntArray(size * size) { index ->
+            val x = index % size
+            val y = index / size
+            val distance = kotlin.math.hypot((x - 450).toDouble(), (y - 450).toDouble())
+            val shade = ((distance - 80) / 160).coerceIn(0.0, 1.0)
+            grey((235 * (0.45 + 0.55 * shade)).toInt())
+        }
+        ScanEnhancer.enhance(pixels, size, size, ScanMode.DOCUMENT)
+        val darkest = (0 until size * size).minOf { pixels[it] and 0xFF }
+        assertTrue("darkest paper pixel is $darkest", darkest > 225)
+    }
+
+    @Test
+    fun keepsColouredBoxColoured() {
+        val orange = (0xFF shl 24) or (210 shl 16) or (80 shl 8) or 20
+        val pixels = IntArray(size * size) { index ->
+            val x = index % size
+            val y = index / size
+            if (x in 150..450 && y in 200..400) orange else grey(235)
+        }
+        ScanEnhancer.enhance(pixels, size, size, ScanMode.DOCUMENT)
+        val center = pixels[300 * size + 300]
+        val red = (center shr 16) and 0xFF
+        val green = (center shr 8) and 0xFF
+        assertTrue("red=$red green=$green", red > 190 && green < 130)
+        assertTrue(value(pixels, 40, 40) > 235)
+    }
+
     @Test
     fun keepsDarkPhotoOnPage() {
         val pixels = IntArray(size * size) { index ->
